@@ -257,5 +257,8 @@ labs/
 - 兩個 systemd unit 只需直接設定各自的 `SERVER_PORT` / `APP_ENVIRONMENT`；
   build metadata 已烤進 jar，**不需要** `EnvironmentFile` 或 `app.env`
 - 示範 workflow 07（App Service + OIDC）另需 Azure 端的 federated credential 與
-  `AZURE_WEB_APP_NAME` / `AZURE_WEB_APP_HOSTNAME` / `AZURE_RESOURCE_GROUP` 變數
+  `AZURE_WEB_APP_NAME` / `AZURE_WEB_APP_HOSTNAME` / `AZURE_RESOURCE_GROUP` 變數，以及
+  GitHub secret `AZURE_WEBAPP_CLIENT_ID`（這個 Web App 專屬 identity 的 client ID，
+  不是 Lab 06 broken-3 用的舊 `AZURE_CLIENT_ID`；舊 secret 維持不動，等其他 VM／Blob
+  相關使用者全部除役後才處理）
 - Lab 07 若要實作，需提供 VM 的 SSH 連線方式
