@@ -22,6 +22,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: simpleweb-deploy
+  cancel-in-progress: false
+
 jobs:
   build-on-selfhosted:
     # 這裡不是 ubuntu-latest，而是你自己註冊的 runner 的 labels
