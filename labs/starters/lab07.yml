@@ -19,6 +19,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: simpleweb-deploy
+  cancel-in-progress: false
+
 jobs:
   on-self-hosted:
     # TODO 1: 指定要跑在你在 VM 上註冊的 self-hosted runner。

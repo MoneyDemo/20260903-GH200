@@ -11,6 +11,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: simpleweb-deploy
+  cancel-in-progress: false
+
 jobs:
   on-self-hosted:
     runs-on: [ self-hosted, Linux, X64, gh200 ]

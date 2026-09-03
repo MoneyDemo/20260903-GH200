@@ -93,6 +93,17 @@
 
 11. **補上 workflow 08 教的「同一台 VM 本機部署」流程：**
     - `actions/checkout@v5`（`persist-credentials: false`）+ `actions/setup-java@v6`（temurin、21）
+    - **在 workflow 層加上共用的部署鎖：**
+      ```yaml
+      concurrency:
+        group: simpleweb-deploy
+        cancel-in-progress: false
+      ```
+      這把鎖要和 workflow 04、05、06、08 共用，因為它們最後都會碰同一個部署資源：
+      04/06 會把 `simpleweb-test` 的 jar 推到測試 VM，05/06 會進一步推正式環境，
+      而這個 lab 也會把檔案寫進同一台 VM 的 `/opt/simpleweb/test`。
+      **`cancel-in-progress: false`** 的意思不是「互相取消」，而是讓後來的部署排隊等前一個完成，
+      避免兩個 deployment job 同時重啟同一個服務、或在同一個檔案路徑上互相覆蓋。
     - **Build 時把完整 commit SHA 與 UTC 時間烤進 artifact：**
       ```bash
       ./mvnw -B verify -Dapp.build.sha="$GITHUB_SHA" -Dapp.build.time="$(date -u +%FT%TZ)"
@@ -182,6 +193,10 @@ on:
 
 permissions:
   contents: read
+
+concurrency:
+  group: simpleweb-deploy
+  cancel-in-progress: false
 
 jobs:
   on-self-hosted:
