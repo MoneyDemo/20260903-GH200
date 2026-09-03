@@ -2,9 +2,13 @@
 # Lab 05 starter — Promote 到 production（核准關卡）
 #
 # 目的地：.github/workflows/lab05-deploy-prod.yml
-# 最快的做法：把 Lab04 完成的內容整份帶過來，再加上第三個 job（deploy-prod）。
 #
-# 事前準備（同 Lab04）：
+# 這是 build once, promote 模式，對應實際課堂使用的 workflow 05：
+#   guard       → 驗證 confirm=deploy 與 build_sha 是否為合法的 40 字元十六進位
+#   deploy-prod → 只用 actions:read 去找 workflow 04 已經跑成功的那個 run，
+#                 下載它的 simpleweb-jar，完全不重新 build、也不重新部署 test
+#
+# 事前準備：
 #   Repository variables : VM_PUBLIC_IP / VM_SSH_USER / VM_SSH_HOST_KEY
 #   Repository secret    : VM_SSH_PRIVATE_KEY
 #   GitHub Environment   : production（必須自己在設定頁加上 required reviewer）
@@ -17,29 +21,46 @@ name: Lab05 Promote to Production
 
 on:
   workflow_dispatch:
+    inputs:
+      confirm:
+        description: 輸入 deploy 以確認要部署到正式環境
+        required: true
+        default: ''
+      build_sha:
+        description: 要 promote 的完整 40 字元 commit SHA
+        required: true
 
-permissions:
-  contents: read
+permissions: {}
 
 concurrency:
   group: simpleweb-lab-deploy
   cancel-in-progress: false
 
 jobs:
-  build:        # 沿用 Lab04：build 時烤入 -Dapp.build.*，再 upload-artifact simpleweb-jar
-  deploy-test:  # 沿用 Lab04：download-artifact → SSH 部署到 :8080 → smoke test
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      # TODO 1: 驗證 inputs.confirm 是否等於 "deploy"，不是就 exit 1
+      # TODO 2: 驗證 inputs.build_sha 是否符合 40 字元小寫十六進位（正則 ^[0-9a-f]{40}$），不是就 exit 1
+      - name: Placeholder（做完上面 TODO 後可以刪掉）
+        run: echo "請把上面的 TODO 換成真正的檢查"
 
   deploy-prod:
     runs-on: ubuntu-latest
-    # TODO 1: needs: [ build, deploy-test ]
-    #   意義：沒有先在 test 驗證過，就不可能上 production。
-    # TODO 2: environment: name production + url http://${{ vars.VM_PUBLIC_IP }}:8081/
+    # TODO 3: needs: guard
+    #   意義：沒通過輸入驗證，就不可能往下跑。
+    # TODO 4: permissions: actions: read
+    #   這是這個 job 唯一需要的權限——只用來讀 run 清單、下載 artifact。
+    # TODO 5: environment: name production + url http://${{ vars.VM_PUBLIC_IP }}:8081/
     #   保護規則（required reviewer）設在 environment 上，不是寫在 YAML 裡。
     steps:
-      # TODO 3: download-artifact 取回「同一份」simpleweb-jar（不要重新 build！）
-      # TODO 4: 用和 deploy-test 完全一樣的 SSH 設定（釘選指紋 + umask 077 + always 清私鑰）
-      # TODO 5: scp + ssh 部署到 /opt/simpleweb/prod/simpleweb.jar，restart simpleweb-prod
+      # TODO 6: 用 gh run list --repo <owner/repo> --workflow 04.deploy-test.yml
+      #         --commit "$BUILD_SHA" --status success --json databaseId,headSha,conclusion
+      #         找出對應的成功 run id；找不到就 exit 1（不要退而求其次自己 build）
+      # TODO 7: 用 gh run download <run_id> --name simpleweb-jar --dir dist 下載那個 run 的 artifact
+      # TODO 8: 用和 workflow 04 完全一樣的 SSH 設定（釘選指紋 + umask 077 + always 清私鑰）
+      # TODO 9: scp + ssh 部署到 /opt/simpleweb/prod/simpleweb.jar，restart simpleweb-prod
       #   （加分：覆蓋前先把現有 jar 備份成 simpleweb.jar.previous）
-      # TODO 6: Smoke test 改打 :8081/api/info，一樣要驗到 buildSha == github.sha
+      # TODO 10: Smoke test 改打 :8081/api/info，驗到 buildSha == inputs.build_sha（不是 github.sha！）
       - name: Placeholder（做完上面 TODO 後可以刪掉）
         run: echo "請把上面的 TODO 換成真正的 steps"
