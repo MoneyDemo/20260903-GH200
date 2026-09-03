@@ -15,10 +15,11 @@ WORKDIR /opt/simpleweb
 
 COPY --from=build /workspace/target/simpleweb.jar ./simpleweb.jar
 
+# Build provenance (SHA/time) is baked into the jar at build time by Maven resource
+# filtering and read from the classpath, so it is intentionally NOT an env var here:
+# APP_BUILD_SHA/APP_BUILD_TIME can never re-stamp what /api/info reports.
 ENV SERVER_PORT=8080 \
-    APP_ENVIRONMENT=local \
-    APP_BUILD_SHA=dev \
-    APP_BUILD_TIME=unknown
+    APP_ENVIRONMENT=local
 
 EXPOSE 8080
 ENTRYPOINT ["java", "-jar", "/opt/simpleweb/simpleweb.jar"]
