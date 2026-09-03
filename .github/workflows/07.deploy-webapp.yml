@@ -66,13 +66,26 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Deploy jar to Linux App Service
-        # 原 release tag: azure/webapps-deploy@v3
-        uses: azure/webapps-deploy@02a81bead70021f5284939794bcec79c271ab383
-        with:
-          app-name: ${{ vars.AZURE_WEB_APP_NAME }}
-          resource-group-name: ${{ vars.AZURE_RESOURCE_GROUP }}
-          package: ./dist/simpleweb.jar
+      # azure/webapps-deploy@v3（pinned 02a81bead70021f5284939794bcec79c271ab383）在
+      # live run 33814165495 於 OneDeploy 階段失敗：Bad Request (CODE: 400)。同一份 jar、
+      # 同一個 App Service 用下列 Azure CLI 指令已驗證部署成功，因此改用明確的
+      # `az webapp deploy`；OIDC token 仍由上一步 azure/login 提供，不使用 publish profile。
+      - name: Deploy jar via Azure CLI (az webapp deploy)
+        shell: bash
+        env:
+          AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+          AZURE_WEB_APP_NAME: ${{ vars.AZURE_WEB_APP_NAME }}
+        run: |
+          set -euo pipefail
+          az webapp deploy \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name "$AZURE_WEB_APP_NAME" \
+            --src-path ./dist/simpleweb.jar \
+            --type jar \
+            --restart true \
+            --clean true \
+            --enable-kudu-warmup true \
+            --enriched-errors true
 
       - name: Smoke test
         shell: bash
