@@ -2,13 +2,16 @@
 #
 # 教學重點
 #   - runs-on 用 label 指定要跑在哪一台 runner 上
-#   - runner 就裝在目標 VM 上，所以「部署」變成單純的本機檔案複製
+#   - 這個教學 demo 把 runner 和部署目標放在同一台 VM，所以「部署」變成單純的本機檔案複製
+#   - 這條路徑不需要 inbound SSH，也不需要把 SSH key 或 Azure credential 放進 workflow
 #   - Runner group 可以控制「哪些 repository 能用哪些 runner」
+#   - 真實 production 通常應該分開 runner 和 application target，避免 runner 權限等同於正式主機權限
 #
 # ⚠️ 安全紅線
-#   絕對不要把 self-hosted runner 掛在「會接受不信任 fork PR」的 public repository 上。
+#   絕對不要讓不信任的 fork PR 跑到 self-hosted runner 上。
 #   外部 PR 送進來的 workflow 會直接在你的機器上執行任意程式碼。
 #   本課的示範 repo 僅供課堂使用，示範結束後請把 runner 移除。
+#   GitHub 不會把 job 派給 30 天內沒有更新 runner application 的 runner。
 #
 # 這支預設不會自動跑；要先在 VM 上註冊好 runner 並貼上 gh200 這個 label。
 name: 08.selfhosted-runner
@@ -25,11 +28,15 @@ jobs:
     runs-on: [self-hosted, linux, gh200]
 
     steps:
-      - uses: actions/checkout@v5
+      # 原 release tag: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
 
       # self-hosted runner 的環境「不會每次重置」，
       # 所以要明確指定版本，不能假設機器上剛好有你要的 JDK
-      - uses: actions/setup-java@v6
+      # 原 release tag: actions/setup-java@v6
+      - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c
         with:
           distribution: temurin
           java-version: '21'
@@ -40,26 +47,33 @@ jobs:
           echo "作業系統：$(uname -a)"
           echo "工作目錄：$(pwd)"
 
+      # build 時把完整 commit SHA 與 UTC 時間烤進 artifact，之後由 /api/info 佐證
       - name: Build and test
-        run: ./mvnw -B verify
+        run: ./mvnw -B verify -Dapp.build.sha="$GITHUB_SHA" -Dapp.build.time="$(date -u +%FT%TZ)"
 
-      # runner 就在目標 VM 上，所以不需要 SSH、也不需要 az vm run-command
+      # runner 就在目標 VM 上，所以不需要遠端登入；服務檔案在本機安裝後直接重啟。
       - name: Deploy locally
         run: |
           set -euo pipefail
           sudo install -o simpleweb -g simpleweb -m 0644 target/simpleweb.jar /opt/simpleweb/test/simpleweb.jar
-          printf 'APP_BUILD_SHA=%s\nAPP_BUILD_TIME=%s\n' "${GITHUB_SHA}" "$(date -u +%FT%TZ)" | sudo tee /opt/simpleweb/test/app.env >/dev/null
           sudo systemctl restart simpleweb-test
           sleep 5
           sudo systemctl is-active simpleweb-test
 
       - name: Smoke test
         run: |
+          set -euo pipefail
+          body=''
           for i in $(seq 1 12); do
-            if curl -fsS http://localhost:8080/api/info; then
+            body="$(curl -fsS http://localhost:8080/api/info || true)"
+            actual_sha="$(BODY="$body" python3 -c 'import json, os; print(json.loads(os.environ["BODY"])["buildSha"])' 2>/dev/null || true)"
+            if [ "$actual_sha" = "$GITHUB_SHA" ]; then
+              echo "$body"
               exit 0
             fi
             echo "等待 Spring Boot 啟動... ($i/12)"
             sleep 5
           done
+          echo "本機部署沒有回報本次完整 commit SHA：$GITHUB_SHA" >&2
+          echo "最後回應：$body" >&2
           exit 1

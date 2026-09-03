@@ -1,11 +1,12 @@
-# 06 - 完整流水線：Build → Test → Package → Deploy(test) → 核准 → Deploy(prod)
+# 06 - 完整流水線：Build → Test/Package → Deploy(test) → 核准 → Deploy(prod)
 #
 # 這支就是課程的終極目標：客戶希望學員上完課能自己寫出這樣一條流水線。
 #
 # 教學重點
 #   - 一條 workflow 裡用 needs: 串出階段
 #   - build once, deploy many：只 build 一次，兩個環境部署同一份產物
-#   - 測試環境自動部署、正式環境要人工核准
+#   - GitHub-hosted runner 透過 SSH 推送到 on-prem VM 模擬環境；artifact 只在 GitHub Actions 內傳遞
+#   - 測試環境自動部署；正式環境由 production Environment 的 required reviewer 把關（真 approval gate）
 #   - 每個階段都有驗證，不是丟出去就算完
 name: 06.full-pipeline
 
@@ -27,184 +28,362 @@ concurrency:
   group: simpleweb-deploy
   cancel-in-progress: false
 
-env:
-  RELEASE_TAG: build-${{ github.sha }}
-
 jobs:
-  # ---------- 1. Build & Test ----------
+  # ---------- 1. Build ----------
   build:
     runs-on: ubuntu-latest
     outputs:
       sha_short: ${{ steps.meta.outputs.sha_short }}
     steps:
-      - uses: actions/checkout@v5
+      # 原 release tag: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-java@v6
+      # 原 release tag: actions/setup-java@v6
+      - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c
         with:
           distribution: temurin
           java-version: '21'
 
-      - name: Build and test
-        run: ./mvnw -B verify
+      # build 時把完整 commit SHA 與 UTC 時間烤進 artifact，之後由 /api/info 佐證
+      - name: Build, test, and package
+        run: ./mvnw -B verify -Dapp.build.sha="$GITHUB_SHA" -Dapp.build.time="$(date -u +%FT%TZ)"
 
       - name: Collect metadata
         id: meta
         run: echo "sha_short=${GITHUB_SHA:0:7}" >> "$GITHUB_OUTPUT"
 
       - name: Upload deployable jar
-        uses: actions/upload-artifact@v7
+        # 原 release tag: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: simpleweb-jar
           path: target/simpleweb.jar
           if-no-files-found: error
 
-  # ---------- 2. Package ----------
+  # ---------- 2. Test/Package ----------
   package:
     runs-on: ubuntu-latest
     needs: build
-    permissions:
-      contents: write
     steps:
-      - uses: actions/checkout@v5
-
-      - uses: actions/download-artifact@v7
+      # 原 release tag: actions/download-artifact@v7
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131
         with:
           name: simpleweb-jar
           path: ./dist
 
-      - name: Publish deployable
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
+      - name: Verify packaged artifact
         run: |
-          printf '%s\n' "$GITHUB_SHA" > ./dist/build-sha.txt
-          sha256sum ./dist/simpleweb.jar | awk '{print $1 "  simpleweb.jar"}' > ./dist/simpleweb.jar.sha256
-          gh release view "$RELEASE_TAG" >/dev/null 2>&1 \
-            || gh release create "$RELEASE_TAG" --prerelease --title "Rolling build" --notes "由 CI 自動更新的最新可部署版本"
-          gh release upload "$RELEASE_TAG" ./dist/simpleweb.jar ./dist/build-sha.txt ./dist/simpleweb.jar.sha256 --clobber
+          set -euo pipefail
+          test -f ./dist/simpleweb.jar
+          sha256sum ./dist/simpleweb.jar
 
   # ---------- 3. Deploy 到測試環境（自動） ----------
   deploy-test:
     runs-on: ubuntu-latest
     needs: package
-    permissions:
-      contents: read
-      id-token: write
     environment:
       name: test
       url: http://${{ vars.VM_PUBLIC_IP }}:8080
     steps:
-      - name: Azure login (OIDC)
-        uses: azure/login@v3
+      # 原 release tag: actions/download-artifact@v7
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131
         with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          name: simpleweb-jar
+          path: ./dist
 
-      # 共享課程訂閱可能有外部 auto-shutdown；部署前先確保 VM 正在執行。
-      - name: Ensure VM is running
-        run: |
-          az vm start \
-            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
-            --name "${{ vars.AZURE_VM_NAME }}"
-
-      - name: Deploy
+      - name: Set up pinned SSH identity
+        id: ssh
+        shell: bash
         env:
-          JAR_URL: ${{ github.server_url }}/${{ github.repository }}/releases/download/${{ env.RELEASE_TAG }}/simpleweb.jar
-          DIGEST_URL: ${{ github.server_url }}/${{ github.repository }}/releases/download/${{ env.RELEASE_TAG }}/simpleweb.jar.sha256
+          SSH_PRIVATE_KEY: ${{ secrets.VM_SSH_PRIVATE_KEY }}
+          SSH_HOST_KEY: ${{ vars.VM_SSH_HOST_KEY }}
         run: |
-          output="$(az vm run-command invoke \
-            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
-            --name "${{ vars.AZURE_VM_NAME }}" \
-            --command-id RunShellScript \
-            --scripts "
-              set -eu
-              curl -fsSL --retry 3 -o /tmp/simpleweb.jar '$JAR_URL'
-              curl -fsSL --retry 3 -o /tmp/simpleweb.jar.sha256 '$DIGEST_URL'
-              cd /tmp
-              sha256sum -c simpleweb.jar.sha256
-              install -o simpleweb -g simpleweb -m 0644 /tmp/simpleweb.jar /opt/simpleweb/test/simpleweb.jar
-              printf 'APP_BUILD_SHA=%s\nAPP_BUILD_TIME=%s\n' '${{ github.sha }}' \"\$(date -u +%FT%TZ)\" > /opt/simpleweb/test/app.env
-              systemctl restart simpleweb-test
-              sleep 5
-              systemctl is-active simpleweb-test
-              echo DEPLOY_OK
-            " \
-            --query "value[0].message" -o tsv)"
-          echo "$output"
-          printf '%s' "$output" | grep -q DEPLOY_OK
+          set -euo pipefail
+          ssh_dir="$RUNNER_TEMP/simpleweb-ssh"
+          key_file="$ssh_dir/id_deploy"
+          known_hosts="$ssh_dir/known_hosts"
+          mkdir -p "$ssh_dir"
+          umask 077
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "$key_file"
+          printf '%s\n' "$SSH_HOST_KEY" > "$known_hosts"
+          echo "key_file=$key_file" >> "$GITHUB_OUTPUT"
+          echo "known_hosts=$known_hosts" >> "$GITHUB_OUTPUT"
+
+      - name: Check SSH connectivity
+        shell: bash
+        env:
+          KEY_FILE: ${{ steps.ssh.outputs.key_file }}
+          KNOWN_HOSTS: ${{ steps.ssh.outputs.known_hosts }}
+          VM_USER: ${{ vars.VM_SSH_USER }}
+          VM_HOST: ${{ vars.VM_PUBLIC_IP }}
+        run: |
+          set -euo pipefail
+          ssh_opts=(
+            -i "$KEY_FILE"
+            -o GlobalKnownHostsFile=/dev/null
+            -o BatchMode=yes
+            -o ConnectTimeout=15
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$KNOWN_HOSTS"
+          )
+          if ! [[ "$VM_USER" =~ ^[A-Za-z_][A-Za-z0-9._-]{0,31}$ ]]; then
+            echo "vars.VM_SSH_USER 格式無效。" >&2
+            exit 1
+          fi
+          IFS=. read -r octet1 octet2 octet3 octet4 extra <<< "$VM_HOST"
+          if [ -n "${extra:-}" ] || [ -z "${octet4:-}" ]; then
+            echo "vars.VM_PUBLIC_IP 必須是 IPv4 位址。" >&2
+            exit 1
+          fi
+          for octet in "$octet1" "$octet2" "$octet3" "$octet4"; do
+            if ! [[ "$octet" =~ ^[0-9]{1,3}$ ]] || [ "$octet" -gt 255 ]; then
+              echo "vars.VM_PUBLIC_IP 必須是有效的 IPv4 位址。" >&2
+              exit 1
+            fi
+          done
+          if ! ssh "${ssh_opts[@]}" -- "$VM_USER@$VM_HOST" 'true'; then
+            echo "SSH 連線失敗：請確認 VM 已啟動，且 TCP/22 已允許從 GitHub-hosted runner 連入。" >&2
+            echo "排除方式：確認 VM 電源已開，並臨時允許 AllowSshFromAzureCloud 的 TCP/22；切勿改開放整個 Internet。" >&2
+            exit 1
+          fi
+
+      - name: Copy jar to VM
+        shell: bash
+        env:
+          KEY_FILE: ${{ steps.ssh.outputs.key_file }}
+          KNOWN_HOSTS: ${{ steps.ssh.outputs.known_hosts }}
+          VM_USER: ${{ vars.VM_SSH_USER }}
+          VM_HOST: ${{ vars.VM_PUBLIC_IP }}
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          remote_jar="simpleweb-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${EXPECTED_SHA}.jar"
+          ssh_opts=(
+            -i "$KEY_FILE"
+            -o GlobalKnownHostsFile=/dev/null
+            -o BatchMode=yes
+            -o ConnectTimeout=15
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$KNOWN_HOSTS"
+          )
+          scp "${ssh_opts[@]}" -- ./dist/simpleweb.jar "$VM_USER@$VM_HOST:$remote_jar"
+          echo "REMOTE_JAR=$remote_jar" >> "$GITHUB_ENV"
+
+      - name: Install and restart test service
+        shell: bash
+        env:
+          KEY_FILE: ${{ steps.ssh.outputs.key_file }}
+          KNOWN_HOSTS: ${{ steps.ssh.outputs.known_hosts }}
+          VM_USER: ${{ vars.VM_SSH_USER }}
+          VM_HOST: ${{ vars.VM_PUBLIC_IP }}
+        run: |
+          set -euo pipefail
+          ssh_opts=(
+            -i "$KEY_FILE"
+            -o GlobalKnownHostsFile=/dev/null
+            -o BatchMode=yes
+            -o ConnectTimeout=15
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$KNOWN_HOSTS"
+          )
+          ssh "${ssh_opts[@]}" -- "$VM_USER@$VM_HOST" bash -s -- "$REMOTE_JAR" "/opt/simpleweb/test/simpleweb.jar" "simpleweb-test" <<'REMOTE_SCRIPT'
+          set -euo pipefail
+          staged_jar="$1"
+          target_jar="$2"
+          service_name="$3"
+          cleanup() {
+            rm -f -- "$HOME/$staged_jar"
+          }
+          trap cleanup EXIT
+          sudo install -o simpleweb -g simpleweb -m 0644 "$HOME/$staged_jar" "$target_jar"
+          sudo systemctl restart "$service_name"
+          sleep 5
+          sudo systemctl is-active "$service_name"
+          REMOTE_SCRIPT
+
+      - name: Clean up SSH key
+        if: always()
+        shell: bash
+        env:
+          KEY_FILE: ${{ steps.ssh.outputs.key_file }}
+        run: |
+          set -euo pipefail
+          rm -f -- "$KEY_FILE"
 
       - name: Smoke test
+        shell: bash
+        env:
+          VM_HOST: ${{ vars.VM_PUBLIC_IP }}
+          EXPECTED_SHA: ${{ github.sha }}
         run: |
+          set -euo pipefail
           body=''
           for i in $(seq 1 10); do
-            body="$(curl -fsS "http://${{ vars.VM_PUBLIC_IP }}:8080/api/info" || true)"
-            printf '%s' "$body" | grep -q "${{ github.sha }}" && { echo "$body"; exit 0; }
+            body="$(curl -fsS "http://$VM_HOST:8080/api/info" || true)"
+            actual_sha="$(BODY="$body" python3 -c 'import json, os; print(json.loads(os.environ["BODY"])["buildSha"])' 2>/dev/null || true)"
+            if [ "$actual_sha" = "$EXPECTED_SHA" ]; then
+              echo "$body"
+              exit 0
+            fi
             echo "等待應用程式啟動... ($i/10)" && sleep 6
           done
+          echo "測試環境沒有回報本次完整 commit SHA：$EXPECTED_SHA" >&2
           echo "最後回應：$body" >&2
           exit 1
 
-  # ---------- 4. Deploy 到正式環境（需人工核准） ----------
+  # ---------- 4. Deploy 到正式環境（production Environment 的 required reviewer 把關） ----------
   deploy-prod:
     runs-on: ubuntu-latest
-    # 必須把 build 也列進 needs，否則 needs.build.outputs 讀不到值
     needs: [build, deploy-test]
-    permissions:
-      contents: read
-      id-token: write
     environment:
       name: production
       url: http://${{ vars.VM_PUBLIC_IP }}:8081
     steps:
-      - name: Azure login (OIDC)
-        uses: azure/login@v3
+      # 原 release tag: actions/download-artifact@v7
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131
         with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          name: simpleweb-jar
+          path: ./dist
 
-      # 共享課程訂閱可能有外部 auto-shutdown；部署前先確保 VM 正在執行。
-      - name: Ensure VM is running
-        run: |
-          az vm start \
-            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
-            --name "${{ vars.AZURE_VM_NAME }}"
-
-      - name: Deploy
+      - name: Set up pinned SSH identity
+        id: ssh
+        shell: bash
         env:
-          JAR_URL: ${{ github.server_url }}/${{ github.repository }}/releases/download/${{ env.RELEASE_TAG }}/simpleweb.jar
-          DIGEST_URL: ${{ github.server_url }}/${{ github.repository }}/releases/download/${{ env.RELEASE_TAG }}/simpleweb.jar.sha256
+          SSH_PRIVATE_KEY: ${{ secrets.VM_SSH_PRIVATE_KEY }}
+          SSH_HOST_KEY: ${{ vars.VM_SSH_HOST_KEY }}
         run: |
-          output="$(az vm run-command invoke \
-            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
-            --name "${{ vars.AZURE_VM_NAME }}" \
-            --command-id RunShellScript \
-            --scripts "
-              set -eu
-              curl -fsSL --retry 3 -o /tmp/simpleweb.jar '$JAR_URL'
-              curl -fsSL --retry 3 -o /tmp/simpleweb.jar.sha256 '$DIGEST_URL'
-              cd /tmp
-              sha256sum -c simpleweb.jar.sha256
-              install -o simpleweb -g simpleweb -m 0644 /tmp/simpleweb.jar /opt/simpleweb/prod/simpleweb.jar
-              printf 'APP_BUILD_SHA=%s\nAPP_BUILD_TIME=%s\n' '${{ github.sha }}' \"\$(date -u +%FT%TZ)\" > /opt/simpleweb/prod/app.env
-              systemctl restart simpleweb-prod
-              sleep 5
-              systemctl is-active simpleweb-prod
-              echo DEPLOY_OK
-            " \
-            --query "value[0].message" -o tsv)"
-          echo "$output"
-          printf '%s' "$output" | grep -q DEPLOY_OK
+          set -euo pipefail
+          ssh_dir="$RUNNER_TEMP/simpleweb-ssh"
+          key_file="$ssh_dir/id_deploy"
+          known_hosts="$ssh_dir/known_hosts"
+          mkdir -p "$ssh_dir"
+          umask 077
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "$key_file"
+          printf '%s\n' "$SSH_HOST_KEY" > "$known_hosts"
+          echo "key_file=$key_file" >> "$GITHUB_OUTPUT"
+          echo "known_hosts=$known_hosts" >> "$GITHUB_OUTPUT"
+
+      - name: Check SSH connectivity
+        shell: bash
+        env:
+          KEY_FILE: ${{ steps.ssh.outputs.key_file }}
+          KNOWN_HOSTS: ${{ steps.ssh.outputs.known_hosts }}
+          VM_USER: ${{ vars.VM_SSH_USER }}
+          VM_HOST: ${{ vars.VM_PUBLIC_IP }}
+        run: |
+          set -euo pipefail
+          ssh_opts=(
+            -i "$KEY_FILE"
+            -o GlobalKnownHostsFile=/dev/null
+            -o BatchMode=yes
+            -o ConnectTimeout=15
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$KNOWN_HOSTS"
+          )
+          if ! [[ "$VM_USER" =~ ^[A-Za-z_][A-Za-z0-9._-]{0,31}$ ]]; then
+            echo "vars.VM_SSH_USER 格式無效。" >&2
+            exit 1
+          fi
+          IFS=. read -r octet1 octet2 octet3 octet4 extra <<< "$VM_HOST"
+          if [ -n "${extra:-}" ] || [ -z "${octet4:-}" ]; then
+            echo "vars.VM_PUBLIC_IP 必須是 IPv4 位址。" >&2
+            exit 1
+          fi
+          for octet in "$octet1" "$octet2" "$octet3" "$octet4"; do
+            if ! [[ "$octet" =~ ^[0-9]{1,3}$ ]] || [ "$octet" -gt 255 ]; then
+              echo "vars.VM_PUBLIC_IP 必須是有效的 IPv4 位址。" >&2
+              exit 1
+            fi
+          done
+          if ! ssh "${ssh_opts[@]}" -- "$VM_USER@$VM_HOST" 'true'; then
+            echo "SSH 連線失敗：請確認 VM 已啟動，且 TCP/22 已允許從 GitHub-hosted runner 連入。" >&2
+            echo "排除方式：確認 VM 電源已開，並臨時允許 AllowSshFromAzureCloud 的 TCP/22；切勿改開放整個 Internet。" >&2
+            exit 1
+          fi
+
+      - name: Copy jar to VM
+        shell: bash
+        env:
+          KEY_FILE: ${{ steps.ssh.outputs.key_file }}
+          KNOWN_HOSTS: ${{ steps.ssh.outputs.known_hosts }}
+          VM_USER: ${{ vars.VM_SSH_USER }}
+          VM_HOST: ${{ vars.VM_PUBLIC_IP }}
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          remote_jar="simpleweb-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${EXPECTED_SHA}.jar"
+          ssh_opts=(
+            -i "$KEY_FILE"
+            -o GlobalKnownHostsFile=/dev/null
+            -o BatchMode=yes
+            -o ConnectTimeout=15
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$KNOWN_HOSTS"
+          )
+          scp "${ssh_opts[@]}" -- ./dist/simpleweb.jar "$VM_USER@$VM_HOST:$remote_jar"
+          echo "REMOTE_JAR=$remote_jar" >> "$GITHUB_ENV"
+
+      - name: Install and restart production service
+        shell: bash
+        env:
+          KEY_FILE: ${{ steps.ssh.outputs.key_file }}
+          KNOWN_HOSTS: ${{ steps.ssh.outputs.known_hosts }}
+          VM_USER: ${{ vars.VM_SSH_USER }}
+          VM_HOST: ${{ vars.VM_PUBLIC_IP }}
+        run: |
+          set -euo pipefail
+          ssh_opts=(
+            -i "$KEY_FILE"
+            -o GlobalKnownHostsFile=/dev/null
+            -o BatchMode=yes
+            -o ConnectTimeout=15
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$KNOWN_HOSTS"
+          )
+          ssh "${ssh_opts[@]}" -- "$VM_USER@$VM_HOST" bash -s -- "$REMOTE_JAR" "/opt/simpleweb/prod/simpleweb.jar" "simpleweb-prod" <<'REMOTE_SCRIPT'
+          set -euo pipefail
+          staged_jar="$1"
+          target_jar="$2"
+          service_name="$3"
+          cleanup() {
+            rm -f -- "$HOME/$staged_jar"
+          }
+          trap cleanup EXIT
+          sudo install -o simpleweb -g simpleweb -m 0644 "$HOME/$staged_jar" "$target_jar"
+          sudo systemctl restart "$service_name"
+          sleep 5
+          sudo systemctl is-active "$service_name"
+          REMOTE_SCRIPT
+
+      - name: Clean up SSH key
+        if: always()
+        shell: bash
+        env:
+          KEY_FILE: ${{ steps.ssh.outputs.key_file }}
+        run: |
+          set -euo pipefail
+          rm -f -- "$KEY_FILE"
 
       - name: Smoke test
+        shell: bash
+        env:
+          VM_HOST: ${{ vars.VM_PUBLIC_IP }}
+          EXPECTED_SHA: ${{ github.sha }}
         run: |
+          set -euo pipefail
           body=''
           for i in $(seq 1 10); do
-            body="$(curl -fsS "http://${{ vars.VM_PUBLIC_IP }}:8081/api/info" || true)"
-            printf '%s' "$body" | grep -q "${{ github.sha }}" && { echo "$body"; exit 0; }
+            body="$(curl -fsS "http://$VM_HOST:8081/api/info" || true)"
+            actual_sha="$(BODY="$body" python3 -c 'import json, os; print(json.loads(os.environ["BODY"])["buildSha"])' 2>/dev/null || true)"
+            if [ "$actual_sha" = "$EXPECTED_SHA" ]; then
+              echo "$body"
+              exit 0
+            fi
             echo "等待應用程式啟動... ($i/10)" && sleep 6
           done
+          echo "正式環境沒有回報本次完整 commit SHA：$EXPECTED_SHA" >&2
           echo "最後回應：$body" >&2
           exit 1
 
