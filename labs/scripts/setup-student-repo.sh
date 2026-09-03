@@ -13,7 +13,8 @@
 #
 # 安全性：不刪除任何檔案、不使用萬用字元、不覆寫既有目錄、不硬編 token。
 #   SSH 私鑰是機密，本腳本不接收私鑰參數；請由講師以
-#   `gh secret set VM_SSH_PRIVATE_KEY --repo <repo> < id_deploy` 另外設定。
+#   `gh secret set VM_SSH_PRIVATE_KEY --env test --repo <repo> < id_deploy`
+#   （並對 production 各設一份 Environment secret，不是 repository secret）另外設定。
 #
 # 用法：
 #   ./setup-student-repo.sh
@@ -155,8 +156,9 @@ set_variable VM_PUBLIC_IP    "$VM_PUBLIC_IP"
 set_variable VM_SSH_USER     "$VM_SSH_USER"
 set_variable VM_SSH_HOST_KEY "$VM_SSH_HOST_KEY"
 
-warn "SSH 私鑰是機密，本腳本不接收私鑰參數。請由講師另外設定："
-warn "    gh secret set VM_SSH_PRIVATE_KEY --repo $MY_REPO < id_deploy"
+warn "SSH 私鑰是機密，本腳本不接收私鑰參數。請由講師設成 test/production 的 Environment secret（不是 repository secret）："
+warn "    gh secret set VM_SSH_PRIVATE_KEY --env test --repo $MY_REPO < id_deploy"
+warn "    gh secret set VM_SSH_PRIVATE_KEY --env production --repo $MY_REPO < id_deploy"
 
 # ---------------------------------------------------------------------------
 # 8. 下一步
@@ -176,8 +178,10 @@ cat <<EOF
          gh variable set VM_PUBLIC_IP    --repo $MY_REPO --body "<VM_PUBLIC_IP>"
          gh variable set VM_SSH_USER     --repo $MY_REPO --body "<USER>"
          gh variable set VM_SSH_HOST_KEY --repo $MY_REPO --body "<known_hosts 條目>"
-     私鑰請由講師設定（不要放進指令列參數）：
-         gh secret set VM_SSH_PRIVATE_KEY --repo $MY_REPO < id_deploy
+     私鑰請由講師設成 test/production 的 Environment secret（不要放進指令列參數）：
+         gh secret set VM_SSH_PRIVATE_KEY --env test --repo $MY_REPO < id_deploy
+         gh secret set VM_SSH_PRIVATE_KEY --env production --repo $MY_REPO < id_deploy
+     （兩個 Environment 都設好、default branch 的 04/05/06 實跑成功後，才由講師另外刪除舊的 repo 層級 secret）
   5. Lab 05 之前，記得到 repo 設定 > Environments > production
      加上 required reviewer（把你自己加進去即可）
   6. Lab 04／05 預設由講師在 class repo 實跑；fork 若沒有專屬的部署金鑰，

@@ -23,12 +23,12 @@
 > 並觀察講師示範 run 在 `production` Environment 等待核准的過程。
 
 - 已完成 [Lab 04](lab04-deploy-test.md)，test 環境可以成功部署，且該次 push 對應的
-  workflow 04 run 是**成功**狀態（Lab05 要靠 `actions:read` 找到它，不會重新 build）
+  你自己的 **`lab04-deploy-test.yml`** run 是**成功**狀態（Lab05 要靠 `actions:read` 找到它，不會重新 build）
 - 你的 repo 已建立 GitHub Environment：**`production`**，且已設定 **required reviewer**
   - `scripts/setup-student-repo.*` 會建立 environment，但**審核者需要你自己或講師指定**
   - 課堂做法：把你自己設為 reviewer，這樣你可以自己按核准，體驗完整流程
-- Variables（`VM_PUBLIC_IP` / `VM_SSH_USER` / `VM_SSH_HOST_KEY`）與 secret
-  （`VM_SSH_PRIVATE_KEY`）同 Lab 04
+- Variables（`VM_PUBLIC_IP` / `VM_SSH_USER` / `VM_SSH_HOST_KEY`）與 **Environment secret**
+  （`VM_SSH_PRIVATE_KEY`，設在 `test` 與 `production` 兩個 Environment，不是 repository secret）同 Lab 04
 - 手邊要有 Lab 04 那次 push 的**完整 40 字元 commit SHA**（`git log --format=%H -1`，
   或到該次 workflow 04 run 頁面複製）——待會觸發 Lab05 時要貼上
 
@@ -63,8 +63,9 @@
    - `needs: guard`：沒通過輸入驗證就不可能往下跑
    - `permissions: { actions: read }`：**這是全 job 唯一需要的權限**，只用來讀 run 清單與下載 artifact，
      不需要 `contents:write`、不需要 Azure 憑證、不需要任何寫入權限
-   - 用 `gh run list --workflow 04.deploy-test.yml --commit "$BUILD_SHA" --status success` 找出
+   - 用 `gh run list --workflow lab04-deploy-test.yml --commit "$BUILD_SHA" --status success` 找出
      `headSha` 等於 `build_sha` 且狀態成功的那個 run，取得它的 run id
+     （這是**你自己**放進 `.github/workflows/lab04-deploy-test.yml` 的 Lab04 run，不是講師的 `04.deploy-test.yml`）
    - 用 `gh run download <run_id> --name simpleweb-jar --dir dist` 下載**那個 run**產生的 artifact
    - 找不到成功的 run，或該 run 沒有 `simpleweb-jar` artifact，都要直接 `exit 1`——**絕對不能**退而求其次自己重新 build
 
@@ -146,7 +147,7 @@ jobs:
     # TODO: permissions: actions: read   ← 最小權限，只用來讀 run 清單、下載 artifact
     # TODO: environment: name production + url（port 8081）
     steps:
-      # TODO: gh run list --workflow 04.deploy-test.yml --commit <build_sha> --status success
+      # TODO: gh run list --workflow lab04-deploy-test.yml --commit <build_sha> --status success
       #       找出成功的 run id，再 gh run download <run_id> --name simpleweb-jar --dir dist
       #       （不要重新 build！找不到就直接失敗，不要退而求其次自己 build）
       # TODO: 用和 workflow 04 一樣的 SSH 設定（釘選指紋 + umask 077 + always 清私鑰）

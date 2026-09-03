@@ -5,7 +5,9 @@
 #
 # 事前準備（講師會在課堂上給你實際值）：
 #   Repository variables : VM_PUBLIC_IP / VM_SSH_USER / VM_SSH_HOST_KEY
-#   Repository secret    : VM_SSH_PRIVATE_KEY（部署用的長期私鑰）
+#   Environment secret   : VM_SSH_PRIVATE_KEY（部署用的長期私鑰；分別設在 test 與
+#                          production 兩個 Environment，不要放成 repository secret，
+#                          這樣任意分支的 job 讀不到這把可 sudo 的長期私鑰）
 #   GitHub Environment   : test
 #
 # 目標環境契約（不可改）：
@@ -27,18 +29,22 @@ permissions:
   contents: read
 
 concurrency:
-  group: simpleweb-lab-deploy
+  # 與 workflow 04/05/06/08 及 lab05/lab07 共用同一把部署鎖，避免同時重啟同一個服務。
+  group: simpleweb-deploy
   cancel-in-progress: false
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      # 用不可變的 40-hex commit SHA 釘選 action（原 release tag: actions/checkout@v5）。
+      # 這是特權部署 workflow，不要把可變 tag 複製進來。
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
           persist-credentials: false
 
-      - uses: actions/setup-java@v6
+      # 原 release tag: actions/setup-java@v6
+      - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c
         with:
           distribution: temurin
           java-version: '21'
@@ -47,7 +53,9 @@ jobs:
       #   讓 /api/info 之後可以佐證版本：
       #   run: ./mvnw -B verify -Dapp.build.sha="$GITHUB_SHA" -Dapp.build.time="$(date -u +%FT%TZ)"
 
-      # TODO 2: 用 actions/upload-artifact@v7 把 target/simpleweb.jar 上傳成 simpleweb-jar
+      # TODO 2: 用 actions/upload-artifact 把 target/simpleweb.jar 上傳成 simpleweb-jar
+      #   釘選成不可變 SHA（原 tag @v7）：
+      #     uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
       #   （deploy job 會用 download-artifact 取回，這樣就不需要 release，也不需要 public repo）
 
   deploy-test:
@@ -55,7 +63,9 @@ jobs:
     # TODO 3: needs: build
     # TODO 4: environment: name test + url http://${{ vars.VM_PUBLIC_IP }}:8080/
     steps:
-      # TODO 5: 用 actions/download-artifact@v7 取回 simpleweb-jar 到 ./dist
+      # TODO 5: 用 actions/download-artifact 取回 simpleweb-jar 到 ./dist
+      #   釘選成不可變 SHA（原 tag @v7）：
+      #     uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131
 
       # TODO 6: 把 secrets.VM_SSH_PRIVATE_KEY 與 vars.VM_SSH_HOST_KEY 寫進 $RUNNER_TEMP，
       #   一定要先 `umask 077`，並把 known_hosts 指向 vars.VM_SSH_HOST_KEY（釘選指紋）。

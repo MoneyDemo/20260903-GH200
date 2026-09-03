@@ -5,12 +5,13 @@
 #
 # 這是 build once, promote 模式，對應實際課堂使用的 workflow 05：
 #   guard       → 驗證 confirm=deploy 與 build_sha 是否為合法的 40 字元十六進位
-#   deploy-prod → 只用 actions:read 去找 workflow 04 已經跑成功的那個 run，
+#   deploy-prod → 只用 actions:read 去找 workflow lab04-deploy-test.yml 已經跑成功的那個 run，
 #                 下載它的 simpleweb-jar，完全不重新 build、也不重新部署 test
 #
 # 事前準備：
 #   Repository variables : VM_PUBLIC_IP / VM_SSH_USER / VM_SSH_HOST_KEY
-#   Repository secret    : VM_SSH_PRIVATE_KEY
+#   Environment secret   : VM_SSH_PRIVATE_KEY（設在 test 與 production 兩個 Environment，
+#                          不是 repository secret）
 #   GitHub Environment   : production（必須自己在設定頁加上 required reviewer）
 #
 # 目標環境契約（不可改）：
@@ -33,7 +34,7 @@ on:
 permissions: {}
 
 concurrency:
-  group: simpleweb-lab-deploy
+  group: simpleweb-deploy
   cancel-in-progress: false
 
 jobs:
@@ -54,9 +55,10 @@ jobs:
     # TODO 5: environment: name production + url http://${{ vars.VM_PUBLIC_IP }}:8081/
     #   保護規則（required reviewer）設在 environment 上，不是寫在 YAML 裡。
     steps:
-      # TODO 6: 用 gh run list --repo <owner/repo> --workflow 04.deploy-test.yml
+      # TODO 6: 用 gh run list --repo <owner/repo> --workflow lab04-deploy-test.yml
       #         --commit "$BUILD_SHA" --status success --json databaseId,headSha,conclusion
-      #         找出對應的成功 run id；找不到就 exit 1（不要退而求其次自己 build）
+      #         找出「你自己」Lab04 部署成功的 run id（檔名是你放進 .github/workflows 的
+      #         lab04-deploy-test.yml，不是講師的 04.deploy-test.yml）；找不到就 exit 1
       # TODO 7: 用 gh run download <run_id> --name simpleweb-jar --dir dist 下載那個 run 的 artifact
       # TODO 8: 用和 workflow 04 完全一樣的 SSH 設定（釘選指紋 + umask 077 + always 清私鑰）
       # TODO 9: scp + ssh 部署到 /opt/simpleweb/prod/simpleweb.jar，restart simpleweb-prod

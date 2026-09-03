@@ -111,7 +111,8 @@ gh variable set VM_PUBLIC_IP --repo <your-account>/20260903-GH200 --body "<實�
 - [ ] 瀏覽器可以連到 GitHub
 - [ ] 你自己帳號底下有一份課程 repo（fork 或 clone），且 **Actions 已啟用**
 - [ ] repo 中已建立 environment：`test` 與 `production`
-- [ ] 若講師已授權你執行 CD：repo secret `VM_SSH_PRIVATE_KEY`（部署用 SSH 私鑰）
+- [ ] 若講師已授權你執行 CD：**Environment secret** `VM_SSH_PRIVATE_KEY`（部署用 SSH 私鑰），
+      分別設在 `test` 與 `production` 兩個 Environment（**不是** repository secret）
 - [ ] repo variables：`VM_PUBLIC_IP` / `VM_SSH_USER` / `VM_SSH_HOST_KEY`（講師提供）
 - [ ] repo 可維持 **private**（SSH 部署不需要匿名下載，也不需要 public repo）
 
@@ -144,19 +145,36 @@ VM_PUBLIC_IP=<VM_PUBLIC_IP> VM_SSH_USER=<USER> VM_SSH_HOST_KEY="<known_hosts 條
   ./setup-student-repo.sh
 ```
 
-> 私鑰是機密，**不要**放進指令列參數（會留在 shell 歷史）。請由講師另外設定：
+> 私鑰是機密，**不要**放進指令列參數（會留在 shell 歷史）。它可 sudo、又是長期憑證，
+> 因此設成 **Environment secret**，分別放進 `test` 與 `production` 兩個 Environment（**不是**
+> repository secret），這樣任意分支的 job 讀不到它。請由講師另外設定（兩個 Environment 各一份）：
 >
-> **PowerShell：** `Get-Content -Raw -LiteralPath id_deploy | gh secret set VM_SSH_PRIVATE_KEY --repo <your-account>/20260903-GH200`
+> **PowerShell：**
+> ```powershell
+> foreach ($e in 'test','production') {
+>   Get-Content -Raw -LiteralPath id_deploy |
+>     gh secret set VM_SSH_PRIVATE_KEY --env $e --repo <your-account>/20260903-GH200
+> }
+> ```
 >
-> **bash：** `gh secret set VM_SSH_PRIVATE_KEY --repo <your-account>/20260903-GH200 < id_deploy`
+> **bash：**
+> ```bash
+> for e in test production; do
+>   gh secret set VM_SSH_PRIVATE_KEY --env "$e" --repo <your-account>/20260903-GH200 < id_deploy
+> done
+> ```
+>
+> 只有在兩個 Environment 都設好、且 default branch 的 04/05/06 workflow 實跑成功之後，才由講師
+> 之後另外刪除任何舊的 repository 層級 `VM_SSH_PRIVATE_KEY`（那是後續的外部設定動作，本腳本不處理）。
 
 腳本**不會**刪除任何東西、不會覆寫既有目錄、也不會硬編任何 token（一律使用你 `gh` 的既有登入狀態）。
 
 ### Lab 04／05 的身分邊界（重要）
 
 VM 的 SSH 私鑰是長期憑證。講師為 class repo 配置的部署金鑰，**不會自動適用到你的 fork**；
-每個要實跑部署的 fork 都需要講師另外授權（把對應公鑰加入 VM，並設定該 fork 的
-`VM_SSH_PRIVATE_KEY` secret 與 `VM_SSH_HOST_KEY` / `VM_SSH_USER` 變數）。
+每個要實跑部署的 fork 都需要講師另外授權（把對應公鑰加入 VM，並在該 fork 的 `test` 與
+`production` 兩個 Environment 各設定一份 `VM_SSH_PRIVATE_KEY` Environment secret，以及
+`VM_SSH_HOST_KEY` / `VM_SSH_USER` 變數）。
 
 本課預設：
 
@@ -198,22 +216,32 @@ labs/
 
 ## 使用的 action 版本
 
-本手冊統一使用下列版本，請照抄，不要自行改版號（不同大版號的參數可能不相容）：
+本手冊在**部署與 self-hosted 相關的特權 workflow（Lab 04／05／07，以及課堂 workflow
+04-08）**一律把 `uses:` **釘選成不可變的 40-hex commit SHA**，並在旁邊用註解保留原始版本
+tag 方便閱讀。**不要**把可變 tag（`@v5` 這種）複製進這些特權 workflow——可變 tag 可被
+重新指向，等於把供應鏈信任交給 tag 持有者。入門與除錯用的 Lab 01-03、Lab 06 為了教學
+可讀性可沿用可讀 tag，但 Lab 06 broken-3 的 `azure/login`（會做 Azure 登入的特權 action）
+同樣釘選成 SHA。
 
-| Action | 版本 | 用途 |
-|---|---|---|
-| `actions/checkout` | **v5** | 把原始碼抓到 runner |
-| `actions/setup-java` | **v6** | 安裝 JDK（temurin / 21） |
-| `actions/upload-artifact` | **v7** | 上傳建置產出 |
-| `actions/download-artifact` | **v7** | 下載建置產出（job 之間交接 jar） |
-| `azure/login` | **v3** | 以 OIDC 登入 Azure（Lab 06 broken-3 與示範 workflow 07 使用） |
+| Action | 原 tag | 釘選 SHA（特權 workflow 用） | 用途 |
+|---|---|---|---|
+| `actions/checkout` | `@v5` | `fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09` | 把原始碼抓到 runner |
+| `actions/setup-java` | `@v6` | `dd06d9cba3e5552c54d9f8ea23572deb30010f7c` | 安裝 JDK（temurin / 21） |
+| `actions/upload-artifact` | `@v7` | `043fb46d1a93c77aae656e7c1c64a875d1fc6a0a` | 上傳建置產出 |
+| `actions/download-artifact` | `@v7` | `37930b1c2abaa49bbe596cd826c3c89aef350131` | 下載建置產出（job 之間交接 jar） |
+| `azure/login` | `@v3` | `7ddb5af1ef8758cf1353cf3b42f940aee27ba21c` | 以 OIDC 登入 Azure（Lab 06 broken-3 與**講師示範** workflow 07 使用） |
+
+> ℹ️ **釘選寫法**：
+> `uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # 原 tag @v5`。
+> 課堂 workflow 04-08 與 Lab 04／05／07 的解答都採這種寫法。
 
 > ℹ️ **為什麼 artifact 系列是 v7？**
 > artifact 系列的 **v4** 執行時會在 log 中出現 **Node.js 20 deprecation 警告**
 > （該 major 版本綁定的 runner runtime 已進入淘汰期）。
 > v7 改用較新的 Node runtime，警告即消失。功能與參數（`name` / `path` /
 > `if-no-files-found` / `retention-days`）與舊版相同，Lab 03 的教學內容不受影響。
-> 其餘 action 維持 `checkout@v5`、`setup-java@v6`、`azure/login@v3`，與課堂 workflow 一致。
+> 其餘 action 對應 `checkout@v5`、`setup-java@v6`、`azure/login@v3` 的同一個大版號，與課堂
+> workflow 一致；差別只在特權 workflow 一律釘選成上表的 40-hex SHA。
 >
 > 在 log 中看到 deprecation 警告時，正確的處理方式就是**升級 action 的 major 版本**，
 > 而不是忽略它——這也是 Lab 06「讀 log」的延伸練習。
@@ -251,9 +279,11 @@ labs/
 ## 給講師的小提醒
 
 - 課前請把實際的 `VM_PUBLIC_IP` / `VM_SSH_USER` / `VM_SSH_HOST_KEY` 準備好發給學員，
-  並為要實跑部署的 fork 設定 `VM_SSH_PRIVATE_KEY` secret
-- VM 的網路安全群組需要開放 **8080** 與 **8081**；SSH 部署期間才臨時允許來源受控的
-  **TCP/22**（例如 `AllowSshFromAzureCloud`），用完即關，**切勿對整個 Internet 常開 22**
+  並為要實跑部署的 fork 在 `test` 與 `production` 兩個 Environment 各設定一份
+  `VM_SSH_PRIVATE_KEY` Environment secret（**不是** repository secret）
+- VM 的網路安全群組需要開放 **8080** 與 **8081**；TCP/22 由 Terraform 以持久的
+  `AllowSshFromAzureCloud` 規則**只對來源 `AzureCloud`** 開放，供 GitHub-hosted runner 在
+  課程期間連線，**不要在每次部署後把它關掉，也切勿改成對整個 Internet 開放 22**
 - 兩個 systemd unit 只需直接設定各自的 `SERVER_PORT` / `APP_ENVIRONMENT`；
   build metadata 已烤進 jar，**不需要** `EnvironmentFile` 或 `app.env`
 - 示範 workflow 07（App Service + OIDC）另需 Azure 端的 federated credential 與

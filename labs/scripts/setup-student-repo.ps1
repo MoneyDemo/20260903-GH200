@@ -17,7 +17,8 @@
       - 不會覆蓋既有的 clone 目錄
       - 不硬編任何 token，一律透過 gh 的既有登入狀態
       - 不接收私鑰參數：SSH 私鑰是機密，請由講師以
-        `Get-Content -Raw -LiteralPath id_deploy | gh secret set VM_SSH_PRIVATE_KEY --repo <repo>` 另外設定
+        `Get-Content -Raw -LiteralPath id_deploy | gh secret set VM_SSH_PRIVATE_KEY --env test --repo <repo>`
+        （並對 production 各設一份 Environment secret，不是 repository secret）另外設定
 
 .EXAMPLE
     .\setup-student-repo.ps1
@@ -185,8 +186,9 @@ Set-RepoVariable -Name 'VM_PUBLIC_IP'   -Value $VmPublicIp
 Set-RepoVariable -Name 'VM_SSH_USER'    -Value $VmSshUser
 Set-RepoVariable -Name 'VM_SSH_HOST_KEY' -Value $VmSshHostKey
 
-Write-Warn 'SSH 私鑰是機密，本腳本不接收私鑰參數。請由講師另外設定：'
-Write-Warn "    Get-Content -Raw -LiteralPath id_deploy | gh secret set VM_SSH_PRIVATE_KEY --repo $myRepo"
+Write-Warn 'SSH 私鑰是機密，本腳本不接收私鑰參數。請由講師設成 test/production 的 Environment secret（不是 repository secret）：'
+Write-Warn "    Get-Content -Raw -LiteralPath id_deploy | gh secret set VM_SSH_PRIVATE_KEY --env test --repo $myRepo"
+Write-Warn "    Get-Content -Raw -LiteralPath id_deploy | gh secret set VM_SSH_PRIVATE_KEY --env production --repo $myRepo"
 
 # ---------------------------------------------------------------------------
 # 8. 下一步
@@ -206,8 +208,10 @@ Write-Host @"
          gh variable set VM_PUBLIC_IP    --repo $myRepo --body "<VM_PUBLIC_IP>"
          gh variable set VM_SSH_USER     --repo $myRepo --body "<USER>"
          gh variable set VM_SSH_HOST_KEY --repo $myRepo --body "<known_hosts 條目>"
-     私鑰請由講師設定（不要放進指令列參數）：
-         Get-Content -Raw -LiteralPath id_deploy | gh secret set VM_SSH_PRIVATE_KEY --repo $myRepo
+     私鑰請由講師設成 test/production 的 Environment secret（不要放進指令列參數）：
+         Get-Content -Raw -LiteralPath id_deploy | gh secret set VM_SSH_PRIVATE_KEY --env test --repo $myRepo
+         Get-Content -Raw -LiteralPath id_deploy | gh secret set VM_SSH_PRIVATE_KEY --env production --repo $myRepo
+     （兩個 Environment 都設好、default branch 的 04/05/06 實跑成功後，才由講師另外刪除舊的 repo 層級 secret）
   5. Lab 05 之前，記得到 repo 設定 > Environments > production
      加上 required reviewer（把你自己加進去即可）
   6. Lab 04／05 預設由講師在 class repo 實跑；fork 若沒有專屬的部署金鑰，

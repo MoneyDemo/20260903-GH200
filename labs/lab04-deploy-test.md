@@ -29,8 +29,10 @@
   - `VM_PUBLIC_IP` ← **課堂上才會拿到，講義中一律寫 `<VM_PUBLIC_IP>`**
   - `VM_SSH_USER` ← VM 上的部署帳號
   - `VM_SSH_HOST_KEY` ← VM 的 SSH 主機公鑰（釘選用的完整 `known_hosts` 條目）
-- 你的 repo 已設定下列 **secret**（講師提供）：
-  - `VM_SSH_PRIVATE_KEY` ← 部署用的 SSH 私鑰
+- 你的 repo 已設定下列 **Environment secret**（講師提供；分別設在 `test` 與 `production` 兩個
+  Environment，**不要**放成 repository secret）：
+  - `VM_SSH_PRIVATE_KEY` ← 部署用的 SSH 私鑰。它可 sudo、又是長期憑證，設成 Environment
+    secret 後只有綁定 `test`／`production` 的 job 讀得到，任意分支的 job 讀不到
 
 > ⚠️ **VM 的 public IP 目前未知。** 本講義所有地方都以 `<VM_PUBLIC_IP>` 或 `${{ vars.VM_PUBLIC_IP }}` 表示，講師會在課堂上公布實際 IP，請把它設定成 repository variable，**不要**寫死在 YAML 裡。
 
@@ -62,7 +64,10 @@ Maven resource filtering 烤進 jar，由應用程式直接從 classpath 讀出�
      ```bash
      ./mvnw -B verify -Dapp.build.sha="$GITHUB_SHA" -Dapp.build.time="$(date -u +%FT%TZ)"
      ```
-   - 用 `actions/upload-artifact@v7` 上傳 `target/simpleweb.jar`（名稱 `simpleweb-jar`）
+   - 用 `actions/upload-artifact` 上傳 `target/simpleweb.jar`（名稱 `simpleweb-jar`）。
+     這是特權部署 workflow，`uses:` 要**釘選成不可變的 40-hex commit SHA**（原 tag `@v7`；
+     實際 SHA 見 [`README.md` 的「使用的 action 版本」](README.md#使用的-action-版本)），
+     不要把可變 tag 複製進來
 
    > **為什麼用 artifact，而不是 release？**
    > jar 只需要在同一次 workflow 的兩個 job 之間傳遞，Actions artifact 就夠了。
@@ -115,9 +120,10 @@ Maven resource filtering 烤進 jar，由應用程式直接從 classpath 讀出�
 ### 對照：為什麼還要學 07 的 App Service + OIDC？
 
 SSH 直覺、好懂，但你必須保管一把長期私鑰、開放來源受控的 TCP/22，還要自己輪替金鑰。
-[Lab 07 的示範 workflow `07.deploy-webapp.yml`](../.github/workflows/07.deploy-webapp.yml)
+**講師示範的對照 workflow [`07.deploy-webapp.yml`](../.github/workflows/07.deploy-webapp.yml)**
 改用 Azure App Service + OIDC：GitHub 每次執行換發短期 token，不保存任何 Azure 長期密碼。
-兩者對照，就能理解「PaaS + 聯合身分」在正式環境常常是更省心的選擇。
+這是**講師端的 PaaS/OIDC 對照示範，不是 Lab 07 的學員實作**（Lab 07 練的是 self-hosted
+runner 的同機部署）。兩者對照，就能理解「PaaS + 聯合身分」在正式環境常常是更省心的選擇。
 
 ## 你要自己完成的 YAML
 
@@ -131,16 +137,16 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      # checkout（persist-credentials: false）/ setup-java
+      # checkout（persist-credentials: false）/ setup-java — uses 一律釘選 40-hex SHA
       # TODO: ./mvnw -B verify -Dapp.build.sha / -Dapp.build.time
-      # TODO: upload-artifact@v7（名稱 simpleweb-jar）
+      # TODO: upload-artifact（釘選 SHA，原 tag @v7；名稱 simpleweb-jar）
 
   deploy-test:
     runs-on: ubuntu-latest
     # TODO: needs: build
     # TODO: environment: name test + url（port 8080）
     steps:
-      # TODO: download-artifact@v7
+      # TODO: download-artifact（釘選 SHA，原 tag @v7）
       # TODO: 寫入私鑰 + 釘選 known_hosts（umask 077）
       # TODO: scp + ssh 部署到 /opt/simpleweb/test，restart simpleweb-test
       # TODO: if: always() 清掉私鑰

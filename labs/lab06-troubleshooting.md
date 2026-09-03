@@ -200,7 +200,10 @@ rerun:
 
 - [ ] Case 1 修好後，Actions 頁面**出現**這個 workflow 的執行紀錄且為綠色
 - [ ] Case 2 修好後，`Build` step 成功並出現 `BUILD SUCCESS`
-- [ ] Case 3 修好後，`Azure login (OIDC)` 成功，`az account show` 印出訂用帳戶資訊
+- [ ] Case 3：你能指出根因是**缺少 `id-token: write`**（沒有它，runner 拿不到索取 OIDC
+      token 所需的環境變數，`azure/login` 第一步就失敗），且修正後的 YAML 只加上**最小必要**的
+      `permissions: { contents: read, id-token: write }`。**不需要**在未配置的學員 fork 上真的
+      登入成功——實際的 Azure 登入由講師用已設定好的 workflow 07（App Service + OIDC）示範
 - [ ] Case 4 修好後，`package` job 成功下載到 `downloaded/simpleweb.jar`
 - [ ] 你已建立 `ACTIONS_STEP_DEBUG`，並能指出 log 中至少一則 `##[debug]` 訊息
 - [ ] 你至少使用過一次 **re-run failed jobs**

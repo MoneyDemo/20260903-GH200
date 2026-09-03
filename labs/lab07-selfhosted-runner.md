@@ -1,8 +1,11 @@
 # Lab 07（選修 / 進階）— Self-hosted runner
 
-> 這個 lab 是**選修**。如果課堂時間不夠，或你的 repo 沒有足夠權限，
-> 可以只讀懂概念與安全警告，不實際操作。
-> 實際操作需要登入講師的 VM，請依講師指示進行。
+> 這個 lab 是**選修，且預設由講師實跑（instructor-run）**。self-hosted runner 的註冊需要
+> SSH 進課程 VM，而該 VM 的 TCP/22 只允許來源 `AzureCloud`——**學員自己的筆電不在
+> `AzureCloud` 範圍內，無法（也不應該）直接 SSH**。因此 runner 的註冊與移除由**講師從
+> Azure Cloud Shell**（或其他 NSG 明確允許、受信任的管理連線）完成；學員在旁觀察，
+> 專注在 `runs-on:` 標籤與 self-hosted runner 的安全邊界。
+> **絕對不要為了連線而把 VM 的 22 埠對整個 Internet 開放。**
 
 ## 學習目標
 
@@ -26,8 +29,10 @@
 ## 前置需求
 
 - 已完成 [Lab 01](lab01-first-workflow.md)
-- 講師提供 VM 的 SSH 連線方式（帳號與 `<VM_PUBLIC_IP>`，課堂上公布）
-- 你對該 repo 有管理權限（註冊 runner 需要）
+- **runner 註冊由講師從 Azure Cloud Shell（或其他 NSG 允許的受信任管理連線）執行**；
+  學員不需要、也無法從自己的筆電 SSH 進這台 VM（22 埠只開放來源 `AzureCloud`），
+  **切勿為了連線而把 22 埠對整個 Internet 開放**
+- 你對該 repo 有管理權限（用來在 GitHub UI 觀察 runner 狀態）
 - ⚠️ 這台 VM 也跑著 `simpleweb-prod`（正式環境）——**這個 lab 只會重啟 `simpleweb-test`**
   （這是本 lab 的教學重點，同 workflow 08），**絕對不要**去停用或更動 `simpleweb-prod`
 
@@ -46,13 +51,17 @@
 
 企業選擇 self-hosted 最常見的理由是：**要連進防火牆內的資料庫、成品庫或部署目標**。
 
-### B. 註冊 runner
+### B. 註冊 runner（講師從 Azure Cloud Shell 執行；學員觀察）
 
-1. 到你 repo 的設定頁，找到 Actions 底下的 Runners，選擇新增 self-hosted runner，平台選 **Linux x64**。
+> 以下註冊步驟由**講師**在 **Azure Cloud Shell**（來源屬於 `AzureCloud`，NSG 允許）或其他
+> 受信任的管理連線上完成。學員的筆電無法 SSH 進這台 source-restricted 的 VM，**也不要**
+> 為此開放 22 埠；學員可在 GitHub UI 觀察 runner 從註冊到 Idle 的狀態變化。
 
-2. GitHub 會產生一段**專屬於你、有時效性的**指令。內容大致是：下載 runner 套件 → 驗證雜湊 → 解壓縮 → 執行設定。**請直接照抄畫面上的指令**，不要用講義裡的版本號（runner 版本會一直更新）。
+1. 到 repo 的設定頁，找到 Actions 底下的 Runners，選擇新增 self-hosted runner，平台選 **Linux x64**。
 
-3. SSH 進 VM，在你自己的家目錄底下建立獨立目錄再操作，例如：
+2. GitHub 會產生一段**專屬、有時效性的**指令。內容大致是：下載 runner 套件 → 驗證雜湊 → 解壓縮 → 執行設定。**請直接照抄畫面上的指令**，不要用講義裡的版本號（runner 版本會一直更新）。
+
+3. 講師從 Azure Cloud Shell SSH 進 VM，在家目錄底下建立獨立目錄再操作，例如：
    ```bash
    mkdir -p ~/actions-runner-<你的名字> && cd ~/actions-runner-<你的名字>
    ```
@@ -163,6 +172,9 @@
 ### F. 收尾：把 runner 移除
 
 **做完一定要移除**，否則這台機器會一直掛在別人的 repo 上。
+
+> 與註冊一樣，移除也由**講師從 Azure Cloud Shell**（或其他受信任管理連線）在 VM 上執行；
+> 學員在 GitHub UI 觀察 runner 從清單消失即可，**不需要、也不應該**自行 SSH 進 VM。
 
 13. 在 SSH 視窗按 `Ctrl+C` 停掉 `./run.sh`。
 

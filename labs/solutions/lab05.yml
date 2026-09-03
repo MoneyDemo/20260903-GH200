@@ -4,7 +4,7 @@ name: Lab05 Promote to Production
 #
 # build once, promote：
 #   guard       → 驗證 confirm=deploy 與 build_sha 是否為合法的 40 字元十六進位
-#   deploy-prod → 只用 actions:read 找出 workflow 04 已經跑成功的那個 run，
+#   deploy-prod → 只用 actions:read 找出 workflow lab04-deploy-test.yml 已經跑成功的那個 run，
 #                 下載它的 simpleweb-jar，完全不重新 build、也不重新部署 test，
 #                 再用 SSH 部署到 production 並用 systemctl 重啟服務
 #
@@ -26,7 +26,7 @@ on:
 permissions: {}
 
 concurrency:
-  group: simpleweb-lab-deploy
+  group: simpleweb-deploy
   cancel-in-progress: false
 
 jobs:
@@ -71,19 +71,19 @@ jobs:
           fi
           run_id="$(gh run list \
             --repo "$GITHUB_REPOSITORY" \
-            --workflow 04.deploy-test.yml \
+            --workflow lab04-deploy-test.yml \
             --commit "$BUILD_SHA" \
             --status success \
             --limit 20 \
             --json databaseId,headSha,conclusion \
             --jq "map(select(.headSha == \"$BUILD_SHA\" and .conclusion == \"success\")) | first | .databaseId // \"\"")"
           if [ -z "$run_id" ]; then
-            echo "找不到 build_sha=$BUILD_SHA 對應的成功 workflow 04 run；請先部署測試環境並確認它成功。" >&2
+            echo "找不到 build_sha=$BUILD_SHA 對應的成功 Lab04（lab04-deploy-test.yml）run；請先部署測試環境並確認它成功。" >&2
             exit 1
           fi
           mkdir -p dist
           if ! gh run download "$run_id" --repo "$GITHUB_REPOSITORY" --name simpleweb-jar --dir dist; then
-            echo "workflow 04 run $run_id 沒有可下載的 simpleweb-jar artifact。" >&2
+            echo "Lab04（lab04-deploy-test.yml）run $run_id 沒有可下載的 simpleweb-jar artifact。" >&2
             exit 1
           fi
           test -f dist/simpleweb.jar

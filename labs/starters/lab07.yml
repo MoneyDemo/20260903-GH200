@@ -42,8 +42,10 @@ jobs:
       #   如果這一步失敗，那正是這個 lab 想讓你體會的重點。
       #   （可以用 `java -version || echo "這台機器沒有 Java"`）
 
-      # TODO 4: actions/checkout@v5（persist-credentials: false）
-      # TODO 5: actions/setup-java@v6（distribution: temurin, java-version: '21'）
+      # TODO 4: actions/checkout，釘選成不可變 SHA（原 tag @v5；persist-credentials: false）
+      #   uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      # TODO 5: actions/setup-java，釘選成不可變 SHA（原 tag @v6；distribution: temurin, java-version: '21'）
+      #   uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c
 
       # TODO 6: Build 時把完整 commit SHA 與 UTC 時間烤進 artifact：
       #   ./mvnw -B verify -Dapp.build.sha="$GITHUB_SHA" -Dapp.build.time="$(date -u +%FT%TZ)"

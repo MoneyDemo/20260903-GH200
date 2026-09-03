@@ -113,7 +113,7 @@ jobs:
           done
           if ! ssh "${ssh_opts[@]}" -- "$VM_USER@$VM_HOST" 'true'; then
             echo "SSH 連線失敗：請確認 VM 已啟動，且 TCP/22 已允許從 GitHub-hosted runner 連入。" >&2
-            echo "排除方式：確認 VM 電源已開，並臨時允許 AllowSshFromAzureCloud 的 TCP/22；切勿改開放整個 Internet。" >&2
+            echo "排除方式：確認 VM 電源已開；TCP/22 已由 Terraform 以持久的 AllowSshFromAzureCloud 規則對來源 AzureCloud 開放（若被政策移除，請講師手動還原同一條規則），切勿改開放整個 Internet。" >&2
             exit 1
           fi
 
