@@ -17,17 +17,15 @@
 
 ## 前置需求
 
-> **預設由講師實跑。** 只有 class repo（或已另建專屬 federated credential 的 fork）
-> 能使用本課 Azure OIDC 身分。你仍要自己完成 YAML，並觀察講師示範 run 在
-> `production` Environment 等待核准的過程。
+> **預設由講師實跑。** production 部署會用到 VM 的長期 SSH 私鑰。你仍要自己完成 YAML，
+> 並觀察講師示範 run 在 `production` Environment 等待核准的過程。
 
 - 已完成 [Lab 04](lab04-deploy-test.md)，test 環境可以成功部署
 - 你的 repo 已建立 GitHub Environment：**`production`**，且已設定 **required reviewer**
   - `scripts/setup-student-repo.*` 會建立 environment，但**審核者需要你自己或講師指定**
   - 課堂做法：把你自己設為 reviewer，這樣你可以自己按核准，體驗完整流程
-- Secrets（`AZURE_CLIENT_ID` / `AZURE_TENANT_ID` / `AZURE_SUBSCRIPTION_ID`）與
-  variables（`AZURE_RESOURCE_GROUP` / `AZURE_VM_NAME` / `VM_PUBLIC_IP`）同 Lab 04
-- repo 為 **public**（VM 需要匿名下載 `build-<commit-sha>` 的 release asset）
+- Variables（`VM_PUBLIC_IP` / `VM_SSH_USER` / `VM_SSH_HOST_KEY`）與 secret
+  （`VM_SSH_PRIVATE_KEY`）同 Lab 04
 
 > ⚠️ VM 的 public IP 一律以 `<VM_PUBLIC_IP>` / `${{ vars.VM_PUBLIC_IP }}` 表示，講師會在課堂上給實際值。
 
@@ -47,12 +45,11 @@
    |---|---|---|
    | `environment.name` | `test` | `production` |
    | systemd service | `simpleweb-test` | `simpleweb-prod` |
-   | jar 目錄（`ENV_DIR`） | `test` | `prod` ← **注意不是 `production`** |
-   | 環境變數檔 | `/opt/simpleweb/test/app.env` | `/opt/simpleweb/prod/app.env` |
+   | jar 目錄 | `/opt/simpleweb/test` | `/opt/simpleweb/prod` ← **注意是 `prod` 不是 `production`** |
    | port | 8080 | 8081 |
 
-   `permissions:`（`contents: read` + `id-token: write`）與 `azure/login@v3` 的寫法完全相同，
-   `JAR_URL` 也完全相同——兩個環境部署的都是 `build-<commit-sha>` 這個 release asset 上的**同一個 jar**。
+   SSH 的寫法（釘選指紋、`umask 077`、`if: always()` 清私鑰）與 `deploy-test` 完全相同。
+   兩個環境部署的都是 build job 上傳的**同一份 artifact**（`download-artifact` 取回同一個 `simpleweb-jar`）。
    這正是「promote（晉升）」的意思：**不重新建置，把已經在 test 驗證過的那一份原封不動送上 production。**
    重新 build 一次會產出不同的二進位檔，等於 test 驗證的東西和上線的東西不是同一個。
 
@@ -61,7 +58,7 @@
 
 5. **（建議）加上上線前備份。** 在覆蓋 `/opt/simpleweb/prod/simpleweb.jar` 之前，先複製一份 `simpleweb.jar.previous`。真實世界的部署腳本幾乎都會這麼做，出事時可以快速回復。
 
-6. **Smoke test 改打 8081。** 其餘邏輯與 Lab 04 相同。
+6. **Smoke test 改打 8081。** 其餘邏輯與 Lab 04 相同——一樣要驗到 `/api/info` 的 `buildSha` 等於本次 commit。
 
 7. **Push，然後觀察核准流程。** 這是本 lab 的重點，請放慢看：
    - `build` 綠了 → `deploy-test` 綠了
@@ -87,9 +84,9 @@
 environment secret  >  repository secret  >  organization secret
 ```
 
-實務上非常有用：`AZURE_CLIENT_ID` 在 `test` 環境指向一個只能碰測試資源的身分，在 `production` 環境指向另一個身分，而 YAML 完全不用改——`${{ secrets.AZURE_CLIENT_ID }}` 會依 job 綁定的 environment 自動解析成正確的值。
-
-同理，只有綁定了 `environment: production` 的 job 才拿得到 production 的 secrets。**沒寫 `environment:` 的 job 永遠拿不到。** 這是很重要的隔離機制。
+實務上非常有用：例如把只有 production 才用得到的憑證放在 `production` environment，
+而 YAML 完全不用改。**沒寫 `environment:` 的 job 永遠拿不到 environment secrets。**
+這是很重要的隔離機制。
 
 ## 你要自己完成的 YAML
 
@@ -97,22 +94,19 @@ Starter：[`starters/lab05.yml`](starters/lab05.yml)
 
 ```yaml
 jobs:
-  build:        # 沿用 Lab04（contents: write + 發佈 build-<commit-sha>）
-  deploy-test:  # 沿用 Lab04
+  build:        # 沿用 Lab04（build 時烤入 -Dapp.build.* + upload-artifact）
+  deploy-test:  # 沿用 Lab04（download-artifact → SSH 部署 :8080）
 
   deploy-prod:
     runs-on: ubuntu-latest
-    # TODO 3a: needs: [ ???, ??? ]
-    # TODO 3b: environment: name production + url（port 8081）
-    # TODO 3c: permissions: contents: read / id-token: write
+    # TODO: needs: [ build, deploy-test ]
+    # TODO: environment: name production + url（port 8081）
     steps:
-      # TODO 3d: azure/login@v3
-      # TODO 3e: az vm run-command invoke
-      #          ENV_DIR = prod / SERVICE = simpleweb-prod
-      #          JAR_URL 與 deploy-test 完全相同（同一個 build-<commit-sha> asset）
-      #          app.env 一樣只更新 APP_BUILD_* 兩行，不要整份覆寫
-      #          （加分：覆蓋前備份成 simpleweb.jar.previous）
-      # TODO 3f: smoke test :8081/actuator/health
+      # TODO: download-artifact 取回「同一份」simpleweb-jar（不要重新 build！）
+      # TODO: 用和 deploy-test 一樣的 SSH 設定（釘選指紋 + umask 077 + always 清私鑰）
+      # TODO: scp + ssh 部署到 /opt/simpleweb/prod，restart simpleweb-prod
+      #       （加分：覆蓋前備份成 simpleweb.jar.previous）
+      # TODO: smoke test :8081/api/info，一樣要驗 buildSha == github.sha
 ```
 
 ## 驗收標準
@@ -123,26 +117,24 @@ jobs:
 - [ ] `curl http://<VM_PUBLIC_IP>:8081/actuator/health` **回傳 200**
 - [ ] 瀏覽器開 `:8081`，environment 顯示 **production**；開 `:8080`，顯示 **test**
 - [ ] 兩個 port 顯示的 build SHA 都等於你這次的 commit SHA
-- [ ] `az vm run-command` 的參數中**沒有任何 token**（只有公開 URL、`prod`、`simpleweb-prod`、SHA）
+- [ ] `deploy-prod` 部署的是 `download-artifact` 取回的同一份 jar（沒有重新 build）
 - [ ] `production` environment 的部署歷史中有這一筆紀錄，含核准者
 - [ ] 你能說出：為什麼保護規則設在 environment 而不是寫在 YAML 裡
-- [ ] 你能說出：為什麼 deploy-prod 不重新 build，而是部署同一個 `build-<commit-sha>` asset
+- [ ] 你能說出：為什麼 deploy-prod 不重新 build，而是部署同一份 artifact
 
 ## 常見錯誤
 
-> Production 解答沿用 Lab 04 的 fail-closed 模式：SHA-256 驗證、`DEPLOY_OK`
-> sentinel，以及 `/api/info` build SHA 比對。若舊服務仍健康但新部署失敗，workflow
-> 必須保持紅燈。
+> Production 解答沿用 Lab 04 的 fail-closed 模式：smoke test 比對 `/api/info` 的 build SHA。
+> 若舊服務仍健康但新部署失敗，workflow 必須保持紅燈。
 
 | 症狀 | 原因 | 修法 |
 |---|---|---|
 | `deploy-prod` 直接就跑了，沒有停下來 | environment 名稱拼錯，或該 environment 沒設 required reviewer | 確認是 `production`（不是 `prod`）且已加審核者 |
 | 核准按鈕沒出現／按不下去 | 你不在 reviewer 名單裡 | 把自己加進 required reviewers |
-| 部署到了 `/opt/simpleweb/production/` | `ENV_DIR` 填成 `production` | 目錄是 `prod`，environment 名稱才是 `production` |
-| 重啟了 `simpleweb-test` 卻說是上 prod | service 名稱沒改 | `SERVICE` 要填 `simpleweb-prod` |
+| 部署到了 `/opt/simpleweb/production/` | jar 目錄填成 `production` | 目錄是 `prod`，environment 名稱才是 `production` |
+| 重啟了 `simpleweb-test` 卻說是上 prod | service 名稱沒改 | 遠端腳本要 restart `simpleweb-prod` |
 | prod 顯示 environment = test | 部署到了 test 目錄/service，或 systemd prod unit 的 `Environment=APP_ENVIRONMENT=production` 錯誤 | 檢查目標目錄、service 名稱與 unit |
-| `Resource group 'null' could not be found` | 用了舊變數名 `VM_RESOURCE_GROUP` / `VM_NAME` | 正確名稱是 `AZURE_RESOURCE_GROUP` / `AZURE_VM_NAME` |
-| VM 上 `curl` 下載 jar 回 404 | build job 沒跑過，或 repo 是 private | 確認 `build-<commit-sha>` 存在且 repo 為 public |
+| `Host key verification failed` | `known_hosts` 指紋不符 | 確認 `vars.VM_SSH_HOST_KEY` 對應這台 VM |
 | smoke test 打 8080 都過，8081 不通 | port 沒改，或 prod 服務沒起來 | 檢查 `systemctl is-active simpleweb-prod` 的輸出 |
 | 抓不到 environment secret | job 沒寫 `environment:` | 只有綁定 environment 的 job 才拿得到 |
 | 等待核准時擔心在燒分鐘數 | 誤解 | 等待期間沒有 runner 被佔用 |

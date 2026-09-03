@@ -8,22 +8,23 @@
       2. 檢查 gh 是否已登入
       3. 把課程 repo fork 到你自己的帳號（已存在就跳過），並 clone 到本機
       4. 在你的 fork 上啟用 GitHub Actions
-      5. 檢查 repo 可見度（Lab 04/05 需要 public 才能讓 VM 匿名下載 release asset）
-      6. 在你的 fork 上建立 test 與 production 兩個 environment
-      7. （選用）設定 Azure OIDC 用的 secrets 與 VM 相關 variables
-      8. 印出下一步
+      5. 在你的 fork 上建立 test 與 production 兩個 environment
+      6. （選用）設定 VM SSH 部署用的「非機密」variables
+      7. 印出下一步
 
     安全性：
       - 不刪除任何檔案、不使用萬用字元
       - 不會覆蓋既有的 clone 目錄
       - 不硬編任何 token，一律透過 gh 的既有登入狀態
+      - 不接收私鑰參數：SSH 私鑰是機密，請由講師以
+        `gh secret set VM_SSH_PRIVATE_KEY --repo <repo> < id_deploy` 另外設定
 
 .EXAMPLE
     .\setup-student-repo.ps1
 
 .EXAMPLE
     .\setup-student-repo.ps1 -TargetDir C:\GH200 -VmPublicIp <VM_PUBLIC_IP> `
-        -AzureResourceGroup rg-gh200 -AzureVmName vm-gh200
+        -VmSshUser azureuser -VmSshHostKey "<known_hosts 條目>"
 #>
 [CmdletBinding()]
 param(
@@ -33,13 +34,10 @@ param(
     # clone 到哪個父目錄底下
     [string] $TargetDir = (Join-Path $HOME 'gh200'),
 
-    # 以下皆為選用，講師在課堂上公布實際值後再填
+    # 以下皆為選用，講師在課堂上公布實際值後再填（皆為非機密）
     [string] $VmPublicIp = '',
-    [string] $AzureResourceGroup = '',
-    [string] $AzureVmName = '',
-    [string] $AzureClientId = '',
-    [string] $AzureTenantId = '',
-    [string] $AzureSubscriptionId = ''
+    [string] $VmSshUser = '',
+    [string] $VmSshHostKey = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -152,22 +150,7 @@ Write-Step '啟用 GitHub Actions'
     -F enabled=true | Out-Null
 if ($LASTEXITCODE -ne 0) { throw 'Actions 啟用失敗，請確認你對該 repo 有 admin 權限。' }
 Write-Ok 'Actions 已啟用（保留既有 allowed-actions policy）'
-
-# ---------------------------------------------------------------------------
-# 5b. 可見度檢查（Lab04/05 需要 public 才能讓 VM 匿名下載 release asset）
-# ---------------------------------------------------------------------------
-Write-Step '檢查 repo 可見度'
-
-$isPrivate = (& gh repo view $myRepo --json isPrivate --jq '.isPrivate').Trim()
-if ($isPrivate -eq 'true') {
-    Write-Warn "$myRepo 目前是 private。"
-    Write-Warn 'Lab 04／05 的 VM 需要「匿名」下載 build-<commit-sha> 的 release asset，'
-    Write-Warn '請把 repo 改成 public，或改用 Lab 04 附錄的 SSH 變體。'
-    Write-Warn '（本腳本不會替你更動可見度，請自行到 repo 設定頁調整。）'
-}
-else {
-    Write-Ok 'repo 為 public，VM 可匿名下載 release asset'
-}
+Write-Host "    註：SSH 部署不需要 public repo，你的 fork 可維持 private。" -ForegroundColor DarkGray
 
 # ---------------------------------------------------------------------------
 # 6. 建立 environments
@@ -183,20 +166,9 @@ foreach ($envName in @('test', 'production')) {
 Write-Warn "production 的 required reviewer 需要你自己在 repo 設定頁加上（Lab 05 會用到）"
 
 # ---------------------------------------------------------------------------
-# 7. 選用：secrets 與 variables
+# 7. 選用：非機密 variables（沒填的會跳過）
 # ---------------------------------------------------------------------------
-Write-Step '設定 secrets 與 variables（沒填的會跳過）'
-
-function Set-RepoSecret {
-    param([string] $Name, [string] $Value)
-    if ([string]::IsNullOrWhiteSpace($Value)) {
-        Write-Warn "secret $Name 未提供，跳過"
-        return
-    }
-    $Value | & gh secret set $Name --repo $myRepo
-    if ($LASTEXITCODE -ne 0) { throw "設定 secret $Name 失敗。" }
-    Write-Ok "secret $Name 已設定"
-}
+Write-Step '設定 variables（沒填的會跳過）'
 
 function Set-RepoVariable {
     param([string] $Name, [string] $Value)
@@ -206,19 +178,15 @@ function Set-RepoVariable {
     }
     & gh variable set $Name --repo $myRepo --body $Value
     if ($LASTEXITCODE -ne 0) { throw "設定 variable $Name 失敗。" }
-    Write-Ok "variable $Name = $Value"
+    Write-Ok "variable $Name 已設定"
 }
 
-Set-RepoSecret   -Name 'AZURE_CLIENT_ID'       -Value $AzureClientId
-Set-RepoSecret   -Name 'AZURE_TENANT_ID'       -Value $AzureTenantId
-Set-RepoSecret   -Name 'AZURE_SUBSCRIPTION_ID' -Value $AzureSubscriptionId
-Set-RepoVariable -Name 'VM_PUBLIC_IP'          -Value $VmPublicIp
-Set-RepoVariable -Name 'AZURE_RESOURCE_GROUP'  -Value $AzureResourceGroup
-Set-RepoVariable -Name 'AZURE_VM_NAME'         -Value $AzureVmName
+Set-RepoVariable -Name 'VM_PUBLIC_IP'   -Value $VmPublicIp
+Set-RepoVariable -Name 'VM_SSH_USER'    -Value $VmSshUser
+Set-RepoVariable -Name 'VM_SSH_HOST_KEY' -Value $VmSshHostKey
 
-if ($AzureClientId -or $AzureTenantId -or $AzureSubscriptionId) {
-    Write-Warn '設定 Azure IDs 不會自動建立 OIDC trust。講師仍必須為這個 fork 建立專屬 federated credential 與 RBAC。'
-}
+Write-Warn 'SSH 私鑰是機密，本腳本不接收私鑰參數。請由講師另外設定：'
+Write-Warn "    gh secret set VM_SSH_PRIVATE_KEY --repo $myRepo < id_deploy"
 
 # ---------------------------------------------------------------------------
 # 8. 下一步
@@ -234,13 +202,14 @@ Write-Host @"
          .\mvnw.cmd -B verify
      成功後應該會產生 target\simpleweb.jar
   3. 打開 labs\README.md，從 Lab 01 開始
-  4. 講師確認你的 fork 已有專屬 OIDC federated credential 與 RBAC 後，
-     才設定 Azure secrets／variables。只有 VM public IP 不代表你已取得 Azure 權限。
-         gh variable set VM_PUBLIC_IP         --repo $myRepo --body "<VM_PUBLIC_IP>"
-         gh variable set AZURE_RESOURCE_GROUP --repo $myRepo --body "<RG>"
-         gh variable set AZURE_VM_NAME        --repo $myRepo --body "<VM>"
+  4. 講師確認你的 fork 已配置好對應的 VM SSH 存取後，才設定部署用的 variables：
+         gh variable set VM_PUBLIC_IP    --repo $myRepo --body "<VM_PUBLIC_IP>"
+         gh variable set VM_SSH_USER     --repo $myRepo --body "<USER>"
+         gh variable set VM_SSH_HOST_KEY --repo $myRepo --body "<known_hosts 條目>"
+     私鑰請由講師設定（不要放進指令列參數）：
+         gh secret set VM_SSH_PRIVATE_KEY --repo $myRepo < id_deploy
   5. Lab 05 之前，記得到 repo 設定 > Environments > production
      加上 required reviewer（把你自己加進去即可）
-  6. Lab 04／05 預設由講師在 class repo 實跑；fork 若沒有專屬 OIDC trust，
-     你仍要完成 YAML，但不要嘗試共用講師的私鑰或長期 client secret。
+  6. Lab 04／05 預設由講師在 class repo 實跑；fork 若沒有專屬的部署金鑰，
+     你仍要完成 YAML，但不要嘗試共用講師的私鑰。
 "@ -ForegroundColor White

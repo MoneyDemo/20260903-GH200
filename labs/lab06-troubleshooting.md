@@ -20,7 +20,8 @@
 
 ## 前置需求
 
-- 已完成 Lab 01 ~ Lab 04（broken-3 需要 Azure secrets 才能重現 OIDC 錯誤；若你的環境還沒設定好，可以只讀 log 訊息並推理）
+- 已完成 Lab 01 ~ Lab 04（broken-3 是獨立的 OIDC 權限題，需要 Azure secrets 才能實跑；
+  OIDC 在本課對應的是 workflow 07 的 App Service 部署路徑。若你的環境還沒設定好，可以只讀 log 訊息並推理）
 - 建議在 repo 開一個新分支做這個 lab，避免污染 `main`
 
 ## 步驟

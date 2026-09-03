@@ -110,7 +110,7 @@
 
 - **Runner groups** — 把 runner 分組，並限制「哪些 repository 或哪些 workflow 可以使用這一組」。例如把能碰 production 的 runner 單獨一組，只開放給特定 repo。
 - **組織／企業層級的 Actions 政策** — 限制可以使用哪些 action（例如只允許 GitHub 官方與已驗證的建立者、或明確列白名單）、是否允許 fork PR 執行、預設的 `GITHUB_TOKEN` 權限等。
-- **Secrets 治理** — 在組織層級集中管理 secrets 並限定可存取的 repo，搭配 environment secrets 做環境隔離。原則不變：**能用 OIDC 就不要存長期憑證**（Lab 04 的做法）。
+- **Secrets 治理** — 在組織層級集中管理 secrets 並限定可存取的 repo，搭配 environment secrets 做環境隔離。原則不變：**能用 OIDC 就不要存長期憑證**（本課對應的是 workflow 07 的 App Service + OIDC 部署路徑；相對地，04-06 的 SSH 路徑就必須自己保管長期私鑰）。
 
 ### F. 收尾：把 runner 移除
 
