@@ -17,7 +17,7 @@
       - 不會覆蓋既有的 clone 目錄
       - 不硬編任何 token，一律透過 gh 的既有登入狀態
       - 不接收私鑰參數：SSH 私鑰是機密，請由講師以
-        `gh secret set VM_SSH_PRIVATE_KEY --repo <repo> < id_deploy` 另外設定
+        `Get-Content -Raw -LiteralPath id_deploy | gh secret set VM_SSH_PRIVATE_KEY --repo <repo>` 另外設定
 
 .EXAMPLE
     .\setup-student-repo.ps1
@@ -186,7 +186,7 @@ Set-RepoVariable -Name 'VM_SSH_USER'    -Value $VmSshUser
 Set-RepoVariable -Name 'VM_SSH_HOST_KEY' -Value $VmSshHostKey
 
 Write-Warn 'SSH 私鑰是機密，本腳本不接收私鑰參數。請由講師另外設定：'
-Write-Warn "    gh secret set VM_SSH_PRIVATE_KEY --repo $myRepo < id_deploy"
+Write-Warn "    Get-Content -Raw -LiteralPath id_deploy | gh secret set VM_SSH_PRIVATE_KEY --repo $myRepo"
 
 # ---------------------------------------------------------------------------
 # 8. 下一步
@@ -207,7 +207,7 @@ Write-Host @"
          gh variable set VM_SSH_USER     --repo $myRepo --body "<USER>"
          gh variable set VM_SSH_HOST_KEY --repo $myRepo --body "<known_hosts 條目>"
      私鑰請由講師設定（不要放進指令列參數）：
-         gh secret set VM_SSH_PRIVATE_KEY --repo $myRepo < id_deploy
+         Get-Content -Raw -LiteralPath id_deploy | gh secret set VM_SSH_PRIVATE_KEY --repo $myRepo
   5. Lab 05 之前，記得到 repo 設定 > Environments > production
      加上 required reviewer（把你自己加進去即可）
   6. Lab 04／05 預設由講師在 class repo 實跑；fork 若沒有專屬的部署金鑰，

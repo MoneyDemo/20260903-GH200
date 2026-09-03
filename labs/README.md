@@ -145,7 +145,10 @@ VM_PUBLIC_IP=<VM_PUBLIC_IP> VM_SSH_USER=<USER> VM_SSH_HOST_KEY="<known_hosts 條
 ```
 
 > 私鑰是機密，**不要**放進指令列參數（會留在 shell 歷史）。請由講師另外設定：
-> `gh secret set VM_SSH_PRIVATE_KEY --repo <your-account>/20260903-GH200 < id_deploy`
+>
+> **PowerShell：** `Get-Content -Raw -LiteralPath id_deploy | gh secret set VM_SSH_PRIVATE_KEY --repo <your-account>/20260903-GH200`
+>
+> **bash：** `gh secret set VM_SSH_PRIVATE_KEY --repo <your-account>/20260903-GH200 < id_deploy`
 
 腳本**不會**刪除任何東西、不會覆寫既有目錄、也不會硬編任何 token（一律使用你 `gh` 的既有登入狀態）。
 
