@@ -1,239 +1,165 @@
 name: Lab05 Promote to Production
 
-on:
-  push:
-    branches: [ main ]
-  workflow_dispatch:
+# 目的地：.github/workflows/lab05-deploy-prod.yml
+#
+# build once, promote：
+#   guard       → 驗證 confirm=deploy 與 build_sha 是否為合法的 40 字元十六進位
+#   deploy-prod → 只用 actions:read 找出 workflow lab04-deploy-test.yml 已經跑成功的那個 run，
+#                 下載它的 simpleweb-jar，完全不重新 build、也不重新部署 test，
+#                 再用 SSH 部署到 production 並用 systemctl 重啟服務
+#
+# 目標環境契約（不可改）：
+#   prod → simpleweb-prod，8081，/opt/simpleweb/prod/simpleweb.jar
+#          （注意目錄是 prod，不是 production；environment 名稱才是 production）
 
-permissions:
-  contents: read
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 輸入 deploy 以確認要部署到正式環境
+        required: true
+        default: ''
+      build_sha:
+        description: 要 promote 的完整 40 字元 commit SHA
+        required: true
+
+permissions: {}
 
 concurrency:
-  group: simpleweb-lab-deploy
+  group: simpleweb-deploy
   cancel-in-progress: false
 
 jobs:
-  build:
+  guard:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
-      - uses: actions/checkout@v5
-
-      - uses: actions/setup-java@v6
-        with:
-          distribution: temurin
-          java-version: '21'
-
-      - name: Build
-        run: |
-          chmod +x ./mvnw
-          ./mvnw -B verify
-
-      - name: Create SHA-256 checksum
-        run: |
-          set -euo pipefail
-          cd target
-          sha256sum simpleweb.jar > simpleweb.jar.sha256
-          cat simpleweb.jar.sha256
-
-      - name: Upload jar as workflow artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: simpleweb-jar
-          path: target/simpleweb.jar
-          if-no-files-found: error
-          retention-days: 1
-
-      - name: Publish jar to rolling pre-release build-${{ github.sha }}
+      - name: Check confirmation input
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CONFIRM: ${{ inputs.confirm }}
+          REQUESTED_SHA: ${{ inputs.build_sha }}
         run: |
           set -euo pipefail
-          if ! gh release view build-${{ github.sha }} --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release create build-${{ github.sha }} \
-              --repo "$GITHUB_REPOSITORY" \
-              --prerelease \
-              --title "build-${{ github.sha }}" \
-              --notes "GH-200 lab 用的滾動式建置產出，由 workflow 自動更新。"
-          fi
-          gh release upload build-${{ github.sha }} \
-            target/simpleweb.jar target/simpleweb.jar.sha256 \
-            --repo "$GITHUB_REPOSITORY" --clobber
-
-  deploy-test:
-    runs-on: ubuntu-latest
-    needs: build
-    environment:
-      name: test
-      url: http://${{ vars.VM_PUBLIC_IP }}:8080/
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - name: Azure login (OIDC)
-        uses: azure/login@v3
-        with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-
-      - name: Ensure VM is running
-        run: |
-          az vm start \
-            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
-            --name "${{ vars.AZURE_VM_NAME }}"
-
-      - name: Deploy to test
-        env:
-          JAR_URL: https://github.com/${{ github.repository }}/releases/download/build-${{ github.sha }}/simpleweb.jar
-          SHA_URL: https://github.com/${{ github.repository }}/releases/download/build-${{ github.sha }}/simpleweb.jar.sha256
-        run: |
-          set -euo pipefail
-          OUT="$(az vm run-command invoke \
-            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
-            --name "${{ vars.AZURE_VM_NAME }}" \
-            --command-id RunShellScript \
-            --parameters "$JAR_URL" "$SHA_URL" "test" "simpleweb-test" "${{ github.sha }}" \
-            --scripts '
-              # RunShellScript 用 /bin/sh 執行：POSIX 語法，沒有 pipefail。
-              set -eu
-              JAR_URL="$1"; SHA_URL="$2"; ENV_DIR="$3"; SERVICE="$4"; SHA="$5"
-              STAGING="/opt/simpleweb/staging/$ENV_DIR"
-              TARGET="/opt/simpleweb/$ENV_DIR"
-              sudo mkdir -p "$STAGING" "$TARGET"
-              sudo rm -f "$STAGING/simpleweb.jar" "$STAGING/simpleweb.jar.sha256"
-              sudo curl -fsSL -o "$STAGING/simpleweb.jar" "$JAR_URL"
-              sudo curl -fsSL -o "$STAGING/simpleweb.jar.sha256" "$SHA_URL"
-              cd "$STAGING"
-              sudo sha256sum -c simpleweb.jar.sha256
-              sudo install -m 0644 -o root -g root "$STAGING/simpleweb.jar" "$TARGET/simpleweb.jar"
-              sudo touch "$TARGET/app.env"
-              sudo sed -i "/^APP_BUILD_SHA=/d; /^APP_BUILD_TIME=/d" "$TARGET/app.env"
-              printf "APP_BUILD_SHA=%s\nAPP_BUILD_TIME=%s\n" "$SHA" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-                | sudo tee -a "$TARGET/app.env" >/dev/null
-              sudo chown root:root "$TARGET/app.env"
-              sudo chmod 0644 "$TARGET/app.env"
-              sudo systemctl restart "$SERVICE"
-              sleep 5
-              sudo systemctl is-active "$SERVICE"
-              echo "DEPLOY_OK $SHA"
-            ' \
-            --query "value[].message" -o tsv)"
-          echo "$OUT"
-          if ! printf '%s' "$OUT" | grep -q "DEPLOY_OK ${{ github.sha }}"; then
-            echo "❌ RunCommand 回報成功，但 VM 上的 script 沒有跑到最後"
+          if [ "$CONFIRM" != "deploy" ]; then
+            echo "請在觸發時輸入 deploy 以確認。" >&2
             exit 1
           fi
-
-      - name: Smoke test test 環境
-        run: |
-          set -euo pipefail
-          BASE="http://${{ vars.VM_PUBLIC_IP }}:8080"
-          EXPECTED="${{ github.sha }}"
-          for i in $(seq 1 12); do
-            if BODY="$(curl -fsS --max-time 5 "$BASE/api/info")"; then
-              echo "$BODY"
-              if printf '%s' "$BODY" | grep -q "$EXPECTED"; then
-                echo "✅ test 環境已更新到 $EXPECTED"
-                exit 0
-              fi
-              echo "服務有回應，但 build SHA 尚未更新為 $EXPECTED"
-            fi
-            echo "等待 test 服務更新中... ($i/12)"
-            sleep 5
-          done
-          echo "❌ test 環境未回報預期的 build SHA"
-          exit 1
+          if ! printf '%s' "$REQUESTED_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "輸入的 build SHA 格式無效，必須是 40 字元小寫十六進位完整 SHA。" >&2
+            exit 1
+          fi
 
   deploy-prod:
     runs-on: ubuntu-latest
-    needs: [ build, deploy-test ]
+    needs: guard
+    permissions:
+      actions: read
+    # production 環境掛了 required reviewer，這個 job 會停在 Waiting 直到核准。
     environment:
       name: production
       url: http://${{ vars.VM_PUBLIC_IP }}:8081/
-    permissions:
-      contents: read
-      id-token: write
     steps:
-      - name: Azure login (OIDC)
-        uses: azure/login@v3
-        with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-
-      - name: Ensure VM is running
-        run: |
-          az vm start \
-            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
-            --name "${{ vars.AZURE_VM_NAME }}"
-
-      - name: Deploy to production
+      - name: Locate successful test deployment artifact
+        shell: bash
         env:
-          JAR_URL: https://github.com/${{ github.repository }}/releases/download/build-${{ github.sha }}/simpleweb.jar
-          SHA_URL: https://github.com/${{ github.repository }}/releases/download/build-${{ github.sha }}/simpleweb.jar.sha256
+          GH_TOKEN: ${{ github.token }}
+          BUILD_SHA: ${{ inputs.build_sha }}
         run: |
           set -euo pipefail
-          OUT="$(az vm run-command invoke \
-            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
-            --name "${{ vars.AZURE_VM_NAME }}" \
-            --command-id RunShellScript \
-            --parameters "$JAR_URL" "$SHA_URL" "prod" "simpleweb-prod" "${{ github.sha }}" \
-            --scripts '
-              # RunShellScript 用 /bin/sh 執行：POSIX 語法，沒有 pipefail。
-              set -eu
-              JAR_URL="$1"; SHA_URL="$2"; ENV_DIR="$3"; SERVICE="$4"; SHA="$5"
-              STAGING="/opt/simpleweb/staging/$ENV_DIR"
-              TARGET="/opt/simpleweb/$ENV_DIR"
-              sudo mkdir -p "$STAGING" "$TARGET"
-              sudo rm -f "$STAGING/simpleweb.jar" "$STAGING/simpleweb.jar.sha256"
-              sudo curl -fsSL -o "$STAGING/simpleweb.jar" "$JAR_URL"
-              sudo curl -fsSL -o "$STAGING/simpleweb.jar.sha256" "$SHA_URL"
-              cd "$STAGING"
-              sudo sha256sum -c simpleweb.jar.sha256
-              if [ -f "$TARGET/simpleweb.jar" ]; then
-                sudo cp -f "$TARGET/simpleweb.jar" "$TARGET/simpleweb.jar.previous"
-              fi
-              sudo install -m 0644 -o root -g root "$STAGING/simpleweb.jar" "$TARGET/simpleweb.jar"
-              sudo touch "$TARGET/app.env"
-              sudo sed -i "/^APP_BUILD_SHA=/d; /^APP_BUILD_TIME=/d" "$TARGET/app.env"
-              printf "APP_BUILD_SHA=%s\nAPP_BUILD_TIME=%s\n" "$SHA" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-                | sudo tee -a "$TARGET/app.env" >/dev/null
-              sudo chown root:root "$TARGET/app.env"
-              sudo chmod 0644 "$TARGET/app.env"
-              sudo systemctl restart "$SERVICE"
-              sleep 5
-              sudo systemctl is-active "$SERVICE"
-              echo "DEPLOY_OK $SHA"
-            ' \
-            --query "value[].message" -o tsv)"
-          echo "$OUT"
-          if ! printf '%s' "$OUT" | grep -q "DEPLOY_OK ${{ github.sha }}"; then
-            echo "❌ RunCommand 回報成功，但 VM 上的 script 沒有跑到最後"
+          if ! printf '%s' "$BUILD_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "輸入的 build SHA 格式無效，必須是 40 字元小寫十六進位完整 SHA。" >&2
             exit 1
           fi
-
-      - name: Smoke test production 環境
+          run_id="$(gh run list \
+            --repo "$GITHUB_REPOSITORY" \
+            --workflow lab04-deploy-test.yml \
+            --commit "$BUILD_SHA" \
+            --status success \
+            --limit 20 \
+            --json databaseId,headSha,conclusion \
+            --jq "map(select(.headSha == \"$BUILD_SHA\" and .conclusion == \"success\")) | first | .databaseId // \"\"")"
+          if [ -z "$run_id" ]; then
+            echo "找不到 build_sha=$BUILD_SHA 對應的成功 Lab04（lab04-deploy-test.yml）run；請先部署測試環境並確認它成功。" >&2
+            exit 1
+          fi
+          mkdir -p dist
+          if ! gh run download "$run_id" --repo "$GITHUB_REPOSITORY" --name simpleweb-jar --dir dist; then
+            echo "Lab04（lab04-deploy-test.yml）run $run_id 沒有可下載的 simpleweb-jar artifact。" >&2
+            exit 1
+          fi
+          test -f dist/simpleweb.jar
+      - name: Set up pinned SSH identity
+        id: ssh
+        shell: bash
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.VM_SSH_PRIVATE_KEY }}
+          SSH_HOST_KEY: ${{ vars.VM_SSH_HOST_KEY }}
         run: |
           set -euo pipefail
-          BASE="http://${{ vars.VM_PUBLIC_IP }}:8081"
-          EXPECTED="${{ github.sha }}"
+          ssh_dir="$RUNNER_TEMP/simpleweb-ssh"
+          mkdir -p "$ssh_dir"
+          umask 077
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "$ssh_dir/id_deploy"
+          printf '%s\n' "$SSH_HOST_KEY" > "$ssh_dir/known_hosts"
+          echo "key_file=$ssh_dir/id_deploy" >> "$GITHUB_OUTPUT"
+          echo "known_hosts=$ssh_dir/known_hosts" >> "$GITHUB_OUTPUT"
+      - name: Deploy to production over SSH
+        shell: bash
+        env:
+          KEY_FILE: ${{ steps.ssh.outputs.key_file }}
+          KNOWN_HOSTS: ${{ steps.ssh.outputs.known_hosts }}
+          VM_USER: ${{ vars.VM_SSH_USER }}
+          VM_HOST: ${{ vars.VM_PUBLIC_IP }}
+          EXPECTED_SHA: ${{ inputs.build_sha }}
+        run: |
+          set -euo pipefail
+          ssh_opts=(
+            -i "$KEY_FILE"
+            -o GlobalKnownHostsFile=/dev/null
+            -o BatchMode=yes
+            -o ConnectTimeout=15
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$KNOWN_HOSTS"
+          )
+          if ! [[ "$VM_USER" =~ ^[A-Za-z_][A-Za-z0-9._-]{0,31}$ ]]; then
+            echo "vars.VM_SSH_USER 格式無效。" >&2; exit 1
+          fi
+          if ! [[ "$VM_HOST" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+            echo "vars.VM_PUBLIC_IP 必須是 IPv4 位址。" >&2; exit 1
+          fi
+          remote_jar="simpleweb-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${EXPECTED_SHA}.jar"
+          scp "${ssh_opts[@]}" -- ./dist/simpleweb.jar "$VM_USER@$VM_HOST:$remote_jar"
+          ssh "${ssh_opts[@]}" -- "$VM_USER@$VM_HOST" bash -s -- "$remote_jar" "/opt/simpleweb/prod/simpleweb.jar" "simpleweb-prod" <<'REMOTE_SCRIPT'
+          set -euo pipefail
+          staged_jar="$1"; target_jar="$2"; service_name="$3"
+          trap 'rm -f -- "$HOME/$staged_jar"' EXIT
+          if [ -f "$target_jar" ]; then
+            sudo cp -- "$target_jar" "${target_jar}.previous"
+          fi
+          sudo install -o simpleweb -g simpleweb -m 0644 "$HOME/$staged_jar" "$target_jar"
+          sudo systemctl restart "$service_name"
+          sleep 5
+          sudo systemctl is-active "$service_name"
+          REMOTE_SCRIPT
+      - name: Clean up SSH key
+        if: always()
+        shell: bash
+        env:
+          KEY_FILE: ${{ steps.ssh.outputs.key_file }}
+        run: rm -f -- "$KEY_FILE"
+      - name: Smoke test production 環境
+        shell: bash
+        env:
+          VM_HOST: ${{ vars.VM_PUBLIC_IP }}
+          EXPECTED_SHA: ${{ inputs.build_sha }}
+        run: |
+          set -euo pipefail
           for i in $(seq 1 12); do
-            if BODY="$(curl -fsS --max-time 5 "$BASE/api/info")"; then
-              echo "$BODY"
-              if printf '%s' "$BODY" | grep -q "$EXPECTED"; then
-                echo "✅ production 環境已更新到 $EXPECTED"
-                exit 0
-              fi
-              echo "服務有回應，但 build SHA 尚未更新為 $EXPECTED"
-            fi
-            echo "等待 production 服務更新中... ($i/12)"
-            sleep 5
+            body="$(curl -fsS --max-time 5 "http://$VM_HOST:8081/api/info" || true)"
+            actual="$(BODY="$body" python3 -c 'import json,os;print(json.loads(os.environ["BODY"])["buildSha"])' 2>/dev/null || true)"
+            if [ "$actual" = "$EXPECTED_SHA" ]; then echo "$body"; exit 0; fi
+            echo "等待 production 服務更新中... ($i/12)"; sleep 5
           done
-          echo "❌ production 環境未回報預期的 build SHA"
-          exit 1
-
+          echo "production 環境未回報預期的 build SHA：$EXPECTED_SHA" >&2; exit 1
       - name: Summary
         if: always()
         run: |
@@ -241,8 +167,8 @@ jobs:
             echo "## Lab05 Production 部署"
             echo ""
             echo "- 核准者：需經由 environment \`production\` 的 required reviewer"
+            echo "- 來源：workflow 04 成功 run 的 simpleweb-jar artifact（沒有重新 build）"
             echo "- Service: \`simpleweb-prod\`（port 8081）"
             echo "- URL: http://${{ vars.VM_PUBLIC_IP }}:8081/"
-            echo "- Commit: \`${{ github.sha }}\`"
-            echo "- 驗證: \`/api/info\` 必須回報同一個 commit SHA"
+            echo "- 版本：\`${{ inputs.build_sha }}\`"
           } >> "$GITHUB_STEP_SUMMARY"

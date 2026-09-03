@@ -17,9 +17,12 @@ import org.springframework.stereotype.Service;
  * Builds the snapshot of "who am I and where am I running" that the demo page
  * and the {@code /api/info} endpoint both render.
  *
- * <p>The environment and the build metadata are supplied by systemd through
- * environment variables, so this is the single place that decides what happens
- * when they are missing or oddly formatted.
+ * <p>The environment is supplied by systemd through the {@code APP_ENVIRONMENT}
+ * variable, so this is the single place that decides what happens when it is
+ * missing or oddly formatted. The build provenance (SHA and time) is not runtime
+ * configuration at all: it is baked into the artifact by Maven resource filtering
+ * and read from the classpath via {@link BuildMetadata}, so it cannot be re-stamped
+ * by an environment variable.
  */
 @Service
 public class InfoService {
@@ -44,12 +47,17 @@ public class InfoService {
     public InfoService(
             @Value("${app.name:SimpleWeb}") String applicationName,
             @Value("${app.version:unknown}") String version,
-            @Value("${app.environment:local}") String environment,
-            @Value("${app.build.sha:dev}") String buildSha,
-            @Value("${app.build.time:unknown}") String buildTime) {
+            @Value("${app.environment:local}") String environment) {
 
-        this(applicationName, version, environment, buildSha, buildTime,
+        this(applicationName, version, environment, BuildMetadata.fromClasspath(),
                 Clock.systemDefaultZone(), InfoService::resolveSystemHostname);
+    }
+
+    InfoService(String applicationName, String version, String environment,
+            BuildMetadata buildMetadata, Clock clock, Supplier<String> hostnameSupplier) {
+
+        this(applicationName, version, environment, buildMetadata.sha(), buildMetadata.time(),
+                clock, hostnameSupplier);
     }
 
     InfoService(String applicationName, String version, String environment, String buildSha,

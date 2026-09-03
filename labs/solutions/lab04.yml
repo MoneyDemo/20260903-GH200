@@ -1,67 +1,57 @@
 name: Lab04 Deploy to Test
 
+# 目的地：.github/workflows/lab04-deploy-test.yml
+#
+# 事前準備（講師會在課堂上給你實際值）：
+#   Repository variables : VM_PUBLIC_IP / VM_SSH_USER / VM_SSH_HOST_KEY
+#   Environment secret   : VM_SSH_PRIVATE_KEY（部署用的長期私鑰；設在 test 與 production
+#                          兩個 Environment，不是 repository secret）
+#   GitHub Environment   : test
+#
+# 目標環境契約（不可改）：
+#   test → systemd service `simpleweb-test`，port 8080，
+#          jar 放在 /opt/simpleweb/test/simpleweb.jar
+#
+# 設計重點：
+#   build job 不接觸 SSH 私鑰；deploy job 才拿到憑證。
+#   build 時把完整 commit SHA / UTC 時間烤進 jar（-Dapp.build.*），
+#   之後由 /api/info 佐證，部署端不再改寫 build metadata。
+
 on:
-  push:
-    branches: [ main ]
   workflow_dispatch:
 
-# workflow 層級維持最小權限，需要更多權限的 job 再自行提升。
 permissions:
   contents: read
 
 concurrency:
-  group: simpleweb-lab-deploy
+  group: simpleweb-deploy
   cancel-in-progress: false
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    permissions:
-      # 建立／更新 build-${{ github.sha }} 這個 rolling pre-release 需要寫入 contents。
-      contents: write
     steps:
-      - uses: actions/checkout@v5
+      # 原 release tag: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-java@v6
+      # 原 release tag: actions/setup-java@v6
+      - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c
         with:
           distribution: temurin
           java-version: '21'
 
-      - name: Build
-        run: |
-          chmod +x ./mvnw
-          ./mvnw -B verify
+      - name: Build and test
+        run: ./mvnw -B verify -Dapp.build.sha="$GITHUB_SHA" -Dapp.build.time="$(date -u +%FT%TZ)"
 
-      - name: Create SHA-256 checksum
-        run: |
-          set -euo pipefail
-          cd target
-          sha256sum simpleweb.jar > simpleweb.jar.sha256
-          cat simpleweb.jar.sha256
-
-      - name: Upload jar as workflow artifact
-        uses: actions/upload-artifact@v7
+      - name: Upload deployable jar
+        # 原 release tag: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: simpleweb-jar
           path: target/simpleweb.jar
           if-no-files-found: error
-          retention-days: 1
-
-      - name: Publish jar to rolling pre-release build-${{ github.sha }}
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          if ! gh release view build-${{ github.sha }} --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release create build-${{ github.sha }} \
-              --repo "$GITHUB_REPOSITORY" \
-              --prerelease \
-              --title "build-${{ github.sha }}" \
-              --notes "GH-200 lab 用的滾動式建置產出，由 workflow 自動更新。"
-          fi
-          gh release upload build-${{ github.sha }} \
-            target/simpleweb.jar target/simpleweb.jar.sha256 \
-            --repo "$GITHUB_REPOSITORY" --clobber
 
   deploy-test:
     runs-on: ubuntu-latest
@@ -69,102 +59,97 @@ jobs:
     environment:
       name: test
       url: http://${{ vars.VM_PUBLIC_IP }}:8080/
-    permissions:
-      contents: read
-      id-token: write
     steps:
-      - name: Azure login (OIDC)
-        uses: azure/login@v3
+      # 原 release tag: actions/download-artifact@v7
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131
         with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          name: simpleweb-jar
+          path: ./dist
 
-      # VM 可能是 deallocated／stopped 狀態；az vm start 具有冪等性，
-      # 已在執行中會直接返回。沒有這一步，RunCommand 會失敗或無限等待。
-      - name: Ensure VM is running
-        run: |
-          az vm start \
-            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
-            --name "${{ vars.AZURE_VM_NAME }}"
-
-      - name: Deploy jar to VM and restart service
+      # 私鑰與釘選的主機指紋都只寫進 runner 的暫存目錄，權限 0600。
+      - name: Set up pinned SSH identity
+        id: ssh
+        shell: bash
         env:
-          # public repo 的 release asset 可匿名下載，因此不需要把任何 token 交給 VM。
-          JAR_URL: https://github.com/${{ github.repository }}/releases/download/build-${{ github.sha }}/simpleweb.jar
-          SHA_URL: https://github.com/${{ github.repository }}/releases/download/build-${{ github.sha }}/simpleweb.jar.sha256
+          SSH_PRIVATE_KEY: ${{ secrets.VM_SSH_PRIVATE_KEY }}
+          SSH_HOST_KEY: ${{ vars.VM_SSH_HOST_KEY }}
         run: |
           set -euo pipefail
-          OUT="$(az vm run-command invoke \
-            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
-            --name "${{ vars.AZURE_VM_NAME }}" \
-            --command-id RunShellScript \
-            --parameters "$JAR_URL" "$SHA_URL" "test" "simpleweb-test" "${{ github.sha }}" \
-            --scripts '
-              # RunShellScript 是用 /bin/sh 執行，不是 bash：
-              # 只能用 POSIX 語法，沒有 pipefail、[[ ]]、陣列。
-              set -eu
-              JAR_URL="$1"; SHA_URL="$2"; ENV_DIR="$3"; SERVICE="$4"; SHA="$5"
-              STAGING="/opt/simpleweb/staging/$ENV_DIR"
-              TARGET="/opt/simpleweb/$ENV_DIR"
-              sudo mkdir -p "$STAGING" "$TARGET"
-              sudo rm -f "$STAGING/simpleweb.jar" "$STAGING/simpleweb.jar.sha256"
-              sudo curl -fsSL -o "$STAGING/simpleweb.jar" "$JAR_URL"
-              sudo curl -fsSL -o "$STAGING/simpleweb.jar.sha256" "$SHA_URL"
-              cd "$STAGING"
-              sudo sha256sum -c simpleweb.jar.sha256
-              sudo install -m 0644 -o root -g root "$STAGING/simpleweb.jar" "$TARGET/simpleweb.jar"
-              sudo touch "$TARGET/app.env"
-              sudo sed -i "/^APP_BUILD_SHA=/d; /^APP_BUILD_TIME=/d" "$TARGET/app.env"
-              printf "APP_BUILD_SHA=%s\nAPP_BUILD_TIME=%s\n" "$SHA" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-                | sudo tee -a "$TARGET/app.env" >/dev/null
-              sudo chown root:root "$TARGET/app.env"
-              sudo chmod 0644 "$TARGET/app.env"
-              sudo systemctl restart "$SERVICE"
-              sleep 5
-              sudo systemctl is-active "$SERVICE"
-              echo "DEPLOY_OK $SHA"
-            ' \
-            --query "value[].message" -o tsv)"
-          echo "$OUT"
-          # RunCommand 的「控制平面成功」只代表指令送達並執行完畢，
-          # 不代表 script 內容成功。一定要自己驗證結尾標記。
-          if ! printf '%s' "$OUT" | grep -q "DEPLOY_OK ${{ github.sha }}"; then
-            echo "❌ RunCommand 回報成功，但 VM 上的 script 沒有跑到最後（找不到 DEPLOY_OK 標記）"
+          ssh_dir="$RUNNER_TEMP/simpleweb-ssh"
+          mkdir -p "$ssh_dir"
+          umask 077
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "$ssh_dir/id_deploy"
+          printf '%s\n' "$SSH_HOST_KEY" > "$ssh_dir/known_hosts"
+          echo "key_file=$ssh_dir/id_deploy" >> "$GITHUB_OUTPUT"
+          echo "known_hosts=$ssh_dir/known_hosts" >> "$GITHUB_OUTPUT"
+
+      - name: Copy jar and restart service
+        shell: bash
+        env:
+          KEY_FILE: ${{ steps.ssh.outputs.key_file }}
+          KNOWN_HOSTS: ${{ steps.ssh.outputs.known_hosts }}
+          VM_USER: ${{ vars.VM_SSH_USER }}
+          VM_HOST: ${{ vars.VM_PUBLIC_IP }}
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          # 釘選主機指紋、關閉 agent、明確逾時；destination 放在 -- 之後避免選項注入。
+          ssh_opts=(
+            -i "$KEY_FILE"
+            -o GlobalKnownHostsFile=/dev/null
+            -o BatchMode=yes
+            -o ConnectTimeout=15
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$KNOWN_HOSTS"
+          )
+          # 驗證使用者名稱與 IP，避免把奇怪的值拼進 ssh 指令。
+          if ! [[ "$VM_USER" =~ ^[A-Za-z_][A-Za-z0-9._-]{0,31}$ ]]; then
+            echo "vars.VM_SSH_USER 格式無效。" >&2
             exit 1
           fi
+          if ! [[ "$VM_HOST" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+            echo "vars.VM_PUBLIC_IP 必須是 IPv4 位址。" >&2
+            exit 1
+          fi
+          remote_jar="simpleweb-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.jar"
+          scp "${ssh_opts[@]}" -- ./dist/simpleweb.jar "$VM_USER@$VM_HOST:$remote_jar"
+          ssh "${ssh_opts[@]}" -- "$VM_USER@$VM_HOST" bash -s -- "$remote_jar" "simpleweb-test" <<'REMOTE_SCRIPT'
+          set -euo pipefail
+          staged_jar="$1"
+          service_name="$2"
+          trap 'rm -f -- "$HOME/$staged_jar"' EXIT
+          sudo install -o simpleweb -g simpleweb -m 0644 "$HOME/$staged_jar" /opt/simpleweb/test/simpleweb.jar
+          sudo systemctl restart "$service_name"
+          sleep 5
+          sudo systemctl is-active "$service_name"
+          REMOTE_SCRIPT
 
-      - name: Smoke test http://VM:8080
+      - name: Clean up SSH key
+        if: always()
+        shell: bash
+        env:
+          KEY_FILE: ${{ steps.ssh.outputs.key_file }}
+        run: rm -f -- "$KEY_FILE"
+
+      # 只檢查 HTTP 200 是不夠的：舊版本還活著時一樣回 200。
+      # 一定要確認 /api/info 的 buildSha 等於這次的 commit。
+      - name: Smoke test
+        shell: bash
+        env:
+          VM_HOST: ${{ vars.VM_PUBLIC_IP }}
+          EXPECTED_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          BASE="http://${{ vars.VM_PUBLIC_IP }}:8080"
-          EXPECTED="${{ github.sha }}"
           for i in $(seq 1 12); do
-            if BODY="$(curl -fsS --max-time 5 "$BASE/api/info")"; then
-              echo "$BODY"
-              # 只確認「有回應」是不夠的：舊版本還活著時一樣會回 200。
-              # 必須確認回傳內容含有這次的 commit SHA。
-              if printf '%s' "$BODY" | grep -q "$EXPECTED"; then
-                echo "✅ test 環境已更新到 $EXPECTED"
-                exit 0
-              fi
-              echo "服務有回應，但 build SHA 尚未更新為 $EXPECTED（可能是舊版本仍在執行）"
+            body="$(curl -fsS --max-time 5 "http://$VM_HOST:8080/api/info" || true)"
+            actual="$(BODY="$body" python3 -c 'import json,os;print(json.loads(os.environ["BODY"])["buildSha"])' 2>/dev/null || true)"
+            if [ "$actual" = "$EXPECTED_SHA" ]; then
+              echo "$body"
+              echo "測試環境已更新到 $EXPECTED_SHA"
+              exit 0
             fi
             echo "等待服務更新中... ($i/12)"
             sleep 5
           done
-          echo "❌ 60 秒內服務未回報預期的 build SHA"
+          echo "服務未在時間內回報預期的 build SHA：$EXPECTED_SHA" >&2
           exit 1
-
-      - name: Summary
-        if: always()
-        run: |
-          {
-            echo "## Lab04 部署到 test"
-            echo ""
-            echo "- Service: \`simpleweb-test\`"
-            echo "- URL: http://${{ vars.VM_PUBLIC_IP }}:8080/"
-            echo "- Commit: \`${{ github.sha }}\`"
-            echo "- Jar 來源: \`build-${{ github.sha }}\` release asset（匿名下載，未傳遞任何 token）"
-            echo "- 完整性: \`sha256sum -c\` 於 VM 端驗證"
-          } >> "$GITHUB_STEP_SUMMARY"

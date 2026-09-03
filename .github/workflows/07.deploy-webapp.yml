@@ -1,0 +1,97 @@
+# 07 - 對照組：用 OIDC 部署到 Linux App Service
+#
+# 教學重點 (Module 5：為什麼 PaaS + OIDC 和 SSH 不一樣)
+#   - 04-06 示範 on-prem VM 模擬環境：需要 inbound TCP/22、長期 SSH 私鑰與主機指紋釘選
+#   - 這支改用 Azure Linux App Service：GitHub 透過 OIDC 換短期 token，不保存 Azure 長期密碼
+#   - OIDC token 權限只放在這個 job，讓學員看到權限要精準地給在需要 OIDC 的地方
+#   - environment: test 沿用既有環境繫結 federated credential 的 subject 條件
+#   - 這是 PaaS/OIDC 對照路徑，不是 VM 部署路徑
+name: 07.deploy-webapp
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      # 原 release tag: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+
+      # 原 release tag: actions/setup-java@v6
+      - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      # build 時把完整 commit SHA 與 UTC 時間烤進 artifact，之後由 /api/info 佐證
+      - name: Build and test
+        run: ./mvnw -B verify -Dapp.build.sha="$GITHUB_SHA" -Dapp.build.time="$(date -u +%FT%TZ)"
+
+      - name: Upload deployable jar
+        # 原 release tag: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: simpleweb-jar
+          path: target/simpleweb.jar
+          if-no-files-found: error
+
+  deploy-webapp:
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      contents: read
+      id-token: write
+    environment:
+      name: test
+      url: https://${{ vars.AZURE_WEB_APP_HOSTNAME }}
+
+    steps:
+      # 原 release tag: actions/download-artifact@v7
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131
+        with:
+          name: simpleweb-jar
+          path: ./dist
+
+      - name: Azure login (OIDC)
+        # 原 release tag: azure/login@v3
+        uses: azure/login@7ddb5af1ef8758cf1353cf3b42f940aee27ba21c
+        with:
+          client-id: ${{ secrets.AZURE_WEBAPP_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy jar to Linux App Service
+        # 原 release tag: azure/webapps-deploy@v3
+        uses: azure/webapps-deploy@02a81bead70021f5284939794bcec79c271ab383
+        with:
+          app-name: ${{ vars.AZURE_WEB_APP_NAME }}
+          resource-group-name: ${{ vars.AZURE_RESOURCE_GROUP }}
+          package: ./dist/simpleweb.jar
+
+      - name: Smoke test
+        shell: bash
+        env:
+          APP_INFO_URL: https://${{ vars.AZURE_WEB_APP_HOSTNAME }}/api/info
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          body=''
+          for i in $(seq 1 12); do
+            body="$(curl -fsS "$APP_INFO_URL" || true)"
+            actual_sha="$(BODY="$body" python3 -c 'import json, os; print(json.loads(os.environ["BODY"])["buildSha"])' 2>/dev/null || true)"
+            if [ "$actual_sha" = "$EXPECTED_SHA" ]; then
+              echo "$body"
+              echo "" && echo "App Service 部署成功"
+              exit 0
+            fi
+            echo "等待 App Service 更新版本... ($i/12)" && sleep 10
+          done
+          echo "App Service 在時間內沒有回報這次完整 commit SHA：$EXPECTED_SHA" >&2
+          echo "最後回應：$body" >&2
+          exit 1

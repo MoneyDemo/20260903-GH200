@@ -1,186 +1,89 @@
 # ---------------------------------------------------------------------------
-# Lab 04 starter — 部署到 test 環境（OIDC + az vm run-command）
+# Lab 04 starter — 用 SSH 部署到 test 環境
 #
 # 目的地：.github/workflows/lab04-deploy-test.yml
 #
 # 事前準備（講師會在課堂上給你實際值）：
-#   Repository variables : AZURE_RESOURCE_GROUP / AZURE_VM_NAME / VM_PUBLIC_IP
-#   Repository secrets   : AZURE_CLIENT_ID / AZURE_TENANT_ID / AZURE_SUBSCRIPTION_ID
+#   Repository variables : VM_PUBLIC_IP / VM_SSH_USER / VM_SSH_HOST_KEY
+#   Environment secret   : VM_SSH_PRIVATE_KEY（部署用的長期私鑰；分別設在 test 與
+#                          production 兩個 Environment，不要放成 repository secret，
+#                          這樣任意分支的 job 讀不到這把可 sudo 的長期私鑰）
 #   GitHub Environment   : test
-#   Repo 可見度          : public（VM 要匿名下載 release asset）
 #
 # 目標環境契約（不可改）：
 #   test → systemd service `simpleweb-test`，port 8080，
 #          jar 放在 /opt/simpleweb/test/simpleweb.jar
-#          環境變數檔 /opt/simpleweb/test/app.env（systemd 讀這一份）
 #
-# ⚠️ 三個實測踩過的坑，starter 已經幫你避開，但你要知道為什麼：
-#   1. `az vm run-command --command-id RunShellScript` 是用 **/bin/sh** 執行，
-#      不是 bash。VM 端的 script 只能用 POSIX 語法：`set -eu`，
-#      **不可以**寫 `set -euo pipefail`、`[[ ]]`、陣列。
-#   2. VM 上只有 JRE，**不保證有 unzip**。完整性驗證改用 `sha256sum -c`
-#      搭配 release 一併發佈的 .sha256 sidecar 檔。
-#   3. RunCommand 的「控制平面成功」不等於「script 成功」。
-#      script 結尾要 echo 一個標記，runner 端再自己 grep 驗證。
+# ⚠️ 三個一定要做到的安全點（starter 已用註解標好）：
+#   1. build job 不碰 SSH 私鑰；deploy job 才拿到憑證。
+#   2. 主機指紋用 vars.VM_SSH_HOST_KEY 事先釘選，不要用 ssh-keyscan 動態信任首次連線。
+#   3. build 時把 commit SHA/時間烤進 jar；部署端「不要」再寫任何 APP_BUILD_* 環境檔。
 # ---------------------------------------------------------------------------
-
 name: Lab04 Deploy to Test
 
 on:
-  push:
-    branches: [ main ]
   workflow_dispatch:
 
-# workflow 層級維持最小權限，需要更多的 job 自己提升。
+# workflow 層級維持最小權限。
 permissions:
   contents: read
 
-# Lab04 與 Lab05 共用同一組，避免兩個 deployment 同時改 VM。
 concurrency:
-  group: simpleweb-lab-deploy
+  # 與 workflow 04/05/06/08 及 lab05/lab07 共用同一把部署鎖，避免同時重啟同一個服務。
+  group: simpleweb-deploy
   cancel-in-progress: false
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
-    # TODO 1: 這個 job 要建立／更新 release，需要哪一個權限？
-    #   permissions:
-    #     contents: ???
-
     steps:
-      - uses: actions/checkout@v5
+      # 用不可變的 40-hex commit SHA 釘選 action（原 release tag: actions/checkout@v5）。
+      # 這是特權部署 workflow，不要把可變 tag 複製進來。
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-java@v6
+      # 原 release tag: actions/setup-java@v6
+      - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c
         with:
           distribution: temurin
           java-version: '21'
 
-      - name: Build
-        run: |
-          chmod +x ./mvnw
-          ./mvnw -B verify
+      # TODO 1: build 時把完整 commit SHA 與 UTC 時間烤進 jar，
+      #   讓 /api/info 之後可以佐證版本：
+      #   run: ./mvnw -B verify -Dapp.build.sha="$GITHUB_SHA" -Dapp.build.time="$(date -u +%FT%TZ)"
 
-      # TODO 2: 產生 SHA-256 sidecar 檔，讓 VM 端可以驗證下載的完整性。
-      #   注意要在 target/ 目錄裡產生，checksum 檔內才會只記錄檔名而非路徑：
-      #   run: |
-      #     set -euo pipefail
-      #     cd target
-      #     sha256sum simpleweb.jar > simpleweb.jar.sha256
-      #     cat simpleweb.jar.sha256
-
-      # TODO 3: 沿用 Lab03 的做法，把 target/simpleweb.jar 上傳成 workflow artifact
-      #   （actions/upload-artifact@v7，名稱 simpleweb-jar；給人下載除錯用）
-
-      # TODO 4: 把 jar 與 checksum 一起發佈成 rolling pre-release `build-${{ github.sha }}`
-      #   gh CLI 在 GitHub 託管 runner 上已預裝，只要提供 GH_TOKEN 即可。
-      #
-      #   env:
-      #     GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      #   run: |
-      #     set -euo pipefail
-      #     if ! gh release view build-${{ github.sha }} --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-      #       gh release create build-${{ github.sha }} \
-      #         --repo "$GITHUB_REPOSITORY" \
-      #         --prerelease \
-      #         --title "build-${{ github.sha }}" \
-      #         --notes "GH-200 lab 用的滾動式建置產出。"
-      #     fi
-      #     gh release upload build-${{ github.sha }} \
-      #       target/simpleweb.jar target/simpleweb.jar.sha256 \
-      #       --repo "$GITHUB_REPOSITORY" --clobber
-      #
-      #   想一下：--clobber 是做什麼用的？沒有它會發生什麼事？
+      # TODO 2: 用 actions/upload-artifact 把 target/simpleweb.jar 上傳成 simpleweb-jar
+      #   釘選成不可變 SHA（原 tag @v7）：
+      #     uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      #   （deploy job 會用 download-artifact 取回，這樣就不需要 release，也不需要 public repo）
 
   deploy-test:
     runs-on: ubuntu-latest
-
-    # TODO 5: 等 build 完成
-    #   needs: ???
-
-    # TODO 6: 綁定 GitHub Environment `test`，並設定 url 讓 Actions 頁面出現連結
-    #   environment:
-    #     name: ???
-    #     url: http://${{ vars.VM_PUBLIC_IP }}:8080/
-
-    # TODO 7: 最小權限。OIDC 一定要 id-token: write。
-    #         注意：這個 job 不需要 contents: write，也不需要任何 token 給 VM。
-    #   permissions:
-    #     contents: read
-    #     id-token: ???
-
+    # TODO 3: needs: build
+    # TODO 4: environment: name test + url http://${{ vars.VM_PUBLIC_IP }}:8080/
     steps:
-      # TODO 8: 用 OIDC 登入 Azure
-      #   uses: azure/login@v3
-      #   with:
-      #     client-id: ${{ secrets.AZURE_CLIENT_ID }}
-      #     tenant-id: ???
-      #     subscription-id: ???
+      # TODO 5: 用 actions/download-artifact 取回 simpleweb-jar 到 ./dist
+      #   釘選成不可變 SHA（原 tag @v7）：
+      #     uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131
 
-      # TODO 9: 確保 VM 是開機狀態（VM 可能被 deallocated）。
-      #   az vm start 具冪等性，已在執行中會直接返回。
-      #   缺這一步，接下來的 RunCommand 會失敗或卡住。
-      #   run: |
-      #     az vm start \
-      #       --resource-group "${{ vars.??? }}" \
-      #       --name "${{ vars.??? }}"
+      # TODO 6: 把 secrets.VM_SSH_PRIVATE_KEY 與 vars.VM_SSH_HOST_KEY 寫進 $RUNNER_TEMP，
+      #   一定要先 `umask 077`，並把 known_hosts 指向 vars.VM_SSH_HOST_KEY（釘選指紋）。
 
-      # TODO 10: 呼叫 az vm run-command invoke 部署
-      #   下面已經幫你寫好會在 VM 上跑的 /bin/sh script（$1..$5 是傳進去的參數），
-      #   你要補的是 --resource-group / --name / --parameters 這幾行。
-      #
-      #   env:
-      #     JAR_URL: https://github.com/${{ github.repository }}/releases/download/build-${{ github.sha }}/simpleweb.jar
-      #     SHA_URL: https://github.com/${{ github.repository }}/releases/download/build-${{ github.sha }}/simpleweb.jar.sha256
-      #   run: |
-      #     set -euo pipefail
-      #     OUT="$(az vm run-command invoke \
-      #       --resource-group "${{ vars.??? }}" \
-      #       --name "${{ vars.??? }}" \
-      #       --command-id RunShellScript \
-      #       --parameters "$JAR_URL" "$SHA_URL" "???" "???" "${{ github.sha }}" \
-      #       --scripts '
-      #         # 這一段跑在 /bin/sh，不是 bash：POSIX 語法、沒有 pipefail。
-      #         set -eu
-      #         JAR_URL="$1"; SHA_URL="$2"; ENV_DIR="$3"; SERVICE="$4"; SHA="$5"
-      #         STAGING="/opt/simpleweb/staging/$ENV_DIR"
-      #         TARGET="/opt/simpleweb/$ENV_DIR"
-      #         sudo mkdir -p "$STAGING" "$TARGET"
-      #         sudo rm -f "$STAGING/simpleweb.jar" "$STAGING/simpleweb.jar.sha256"
-      #         sudo curl -fsSL -o "$STAGING/simpleweb.jar" "$JAR_URL"
-      #         sudo curl -fsSL -o "$STAGING/simpleweb.jar.sha256" "$SHA_URL"
-      #         cd "$STAGING"
-      #         sudo sha256sum -c simpleweb.jar.sha256
-      #         sudo install -m 0644 -o root -g root "$STAGING/simpleweb.jar" "$TARGET/simpleweb.jar"
-      #         sudo touch "$TARGET/app.env"
-      #         sudo sed -i "/^APP_BUILD_SHA=/d; /^APP_BUILD_TIME=/d" "$TARGET/app.env"
-      #         printf "APP_BUILD_SHA=%s\nAPP_BUILD_TIME=%s\n" "$SHA" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-      #           | sudo tee -a "$TARGET/app.env" >/dev/null
-      #         sudo chown root:root "$TARGET/app.env"
-      #         sudo chmod 0644 "$TARGET/app.env"
-      #         sudo systemctl restart "$SERVICE"
-      #         sleep 5
-      #         sudo systemctl is-active "$SERVICE"
-      #         echo "DEPLOY_OK $SHA"
-      #       ' \
-      #       --query "value[].message" -o tsv)"
-      #     echo "$OUT"
-      #     # RunCommand 控制平面成功 ≠ script 成功，一定要驗證結尾標記。
-      #     if ! printf '%s' "$OUT" | grep -q "DEPLOY_OK ${{ github.sha }}"; then
-      #       echo "❌ RunCommand 回報成功，但 VM 上的 script 沒跑到最後"
-      #       exit 1
-      #     fi
-      #
-      #   提示：ENV_DIR 要填 test（對應 /opt/simpleweb/test），
-      #         SERVICE 要填 simpleweb-test。
-      #   注意：script 用 sed 只覆蓋 APP_BUILD_* 兩行，
-      #         是為了保留 app.env 裡既有的 SERVER_PORT / APP_ENVIRONMENT。
+      # TODO 7: scp jar 上 VM，再 ssh 進去 install + systemctl restart simpleweb-test。
+      #   要點：
+      #     - ssh/scp 一律加上：
+      #         -o StrictHostKeyChecking=yes
+      #         -o UserKnownHostsFile=<剛剛寫的 known_hosts>
+      #         -o GlobalKnownHostsFile=/dev/null -o BatchMode=yes -o ConnectTimeout=15
+      #     - destination（user@host）放在 `--` 之後
+      #     - 遠端腳本用 `set -euo pipefail`，並 trap 清掉暫存 jar
+      #     - install 到 /opt/simpleweb/test/simpleweb.jar 後 restart 並 `systemctl is-active`
 
-      # TODO 11: Smoke test —— 而且必須「驗到版本」
-      #   對 http://${{ vars.VM_PUBLIC_IP }}:8080/api/info 做 curl，
-      #   最多重試 12 次、每次間隔 5 秒。
-      #   ⚠️ 只檢查 HTTP 200 是不夠的：舊版本還活著時一樣回 200，
-      #      會讓失敗的部署變成假的綠燈。
-      #      必須確認回應內容包含 ${{ github.sha }}，否則 exit 1。
+      # TODO 8: if: always() 時 rm -f 掉私鑰檔（減少殘留）
+
+      # TODO 9: Smoke test —— 必須「驗到版本」
+      #   對 http://${{ vars.VM_PUBLIC_IP }}:8080/api/info 取 buildSha，
+      #   最多重試 12 次、每次間隔 5 秒；只有 buildSha == github.sha 才算成功。
       - name: Placeholder（做完上面 TODO 後可以刪掉）
         run: echo "請把上面的 TODO 換成真正的 steps"

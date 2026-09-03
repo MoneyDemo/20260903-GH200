@@ -10,8 +10,8 @@ GitHub Actions workflow，不是這支應用程式。
 
 - **學員練習手冊**：[labs/README.md](labs/README.md)
 - **Workflow 範例**：[.github/workflows/](.github/workflows/)
-- **Test 環境**：<http://20.210.89.243:8080>
-- **Production 環境**：<http://20.210.89.243:8081>
+- **Test 環境**：`http://<VM_PUBLIC_IP>:8080`（實際 IP 由講師於課堂公布）
+- **Production 環境**：`http://<VM_PUBLIC_IP>:8081`
 
 ### 漸進式 Workflow
 
@@ -20,10 +20,10 @@ GitHub Actions workflow，不是這支應用程式。
 | 01 | `01.build.yml` | 第一個 workflow、trigger、job、step |
 | 02 | `02.build-test.yml` | CI、測試、log、job summary |
 | 03 | `03.package-artifact.yml` | `needs`、artifact、job 間傳檔 |
-| 04 | `04.deploy-test.yml` | OIDC 登入 Azure、部署到 test |
+| 04 | `04.deploy-test.yml` | SSH 部署到 on-prem VM 的 test 環境 |
 | 05 | `05.deploy-prod.yml` | GitHub Environment、approval gate |
 | 06 | `06.full-pipeline.yml` | Build → Test → Package → Deploy |
-| 07 | `07.deploy-ssh.yml` | SSH 與 OIDC 安全性對照 |
+| 07 | `07.deploy-webapp.yml` | 對照組：OIDC 部署到 Azure App Service |
 | 08 | `08.selfhosted-runner.yml` | Self-hosted runner（選修） |
 | 09 | `09.troubleshooting.yml` | 故意失敗，用 workflow log 找錯 |
 
@@ -57,19 +57,17 @@ GitHub Actions workflow，不是這支應用程式。
 .\mvnw spring-boot:run
 ```
 
-想模擬部署後的樣子，可以先設環境變數再啟動：
+想模擬部署後的樣子，用 `APP_ENVIRONMENT` 切換橫幅（build SHA／時間是 build 時烤進 jar 的，不是執行期環境變數）：
 
 ```powershell
 $env:APP_ENVIRONMENT = "test"
-$env:APP_BUILD_SHA   = "a1b2c3d"
-$env:APP_BUILD_TIME  = "2026-09-03T00:10:00Z"
 .\mvnw spring-boot:run
 ```
 
-打包並直接跑 jar：
+打包時可注入版本資訊（CI 就是這樣做），再直接跑 jar：
 
 ```powershell
-.\mvnw -B package
+.\mvnw -B package "-Dapp.build.sha=a1b2c3d" "-Dapp.build.time=2026-09-03T00:10:00Z"
 java -jar target\simpleweb.jar
 ```
 
@@ -115,29 +113,30 @@ java -jar target\simpleweb.jar
 }
 ```
 
-## 環境變數
+## 環境變數與 build 資訊
 
-所有執行期設定都走環境變數，**不會**被編進 jar 裡；部署時由 systemd 的 `Environment=` 提供。
+執行期設定（port 與環境）走環境變數，由 systemd 的 `Environment=` 提供：
 
 | 環境變數 | 預設值 | 說明 |
 | --- | --- | --- |
 | `SERVER_PORT` | `8080` | HTTP 監聽的 port |
 | `APP_ENVIRONMENT` | `local` | `test` / `production` / `local`，決定橫幅顏色與文字 |
-| `APP_BUILD_SHA` | `dev` | CI 注入的 git commit SHA |
-| `APP_BUILD_TIME` | `unknown` | CI 注入的建置時間 |
 
 對應關係寫在 `src/main/resources/application.yml`：
 
 ```yaml
 app:
   environment: ${APP_ENVIRONMENT:local}
-  build:
-    sha: ${APP_BUILD_SHA:dev}
-    time: ${APP_BUILD_TIME:unknown}
 ```
 
-因為是執行期讀取，**同一個 jar** 可以同時部署到 test 與 production，只靠環境變數區分。
-`app.version` 則是在建置時由 Maven 從 `pom.xml` 的 `<version>` 填入。
+**build 資訊（`buildSha` / `buildTime`）不是環境變數。** 它在 build 時由 Maven resource
+filtering 烤進 `src/main/resources/build-metadata.properties`（CI 傳
+`-Dapp.build.sha` / `-Dapp.build.time`），再由 `BuildMetadata` 直接從 classpath 讀出。
+因此設定 `APP_BUILD_SHA` / `APP_BUILD_TIME` 環境變數**無法**改寫 `/api/info` 回報的版本——
+這是刻意的來源可信度設計。`app.version` 同樣在建置時由 Maven 從 `pom.xml` 的 `<version>` 填入。
+
+因為環境是執行期讀取，**同一個 jar** 可以同時部署到 test 與 production，只靠 `APP_ENVIRONMENT` 區分；
+而它回報的 build SHA 永遠是「烤進這個 jar 的那一次 build」。
 
 ## 部署到 VM
 
@@ -155,11 +154,11 @@ Unit 檔大致長這樣（`/etc/systemd/system/simpleweb-test.service`）：
 [Service]
 Environment=SERVER_PORT=8080
 Environment=APP_ENVIRONMENT=test
-EnvironmentFile=-/opt/simpleweb/test/app.env
 ExecStart=/usr/bin/java -jar /opt/simpleweb/test/simpleweb.jar
 ```
 
-部署 workflow 會把 `APP_BUILD_SHA` 與 `APP_BUILD_TIME` 寫入 `app.env`。
+部署 workflow 只把新的 jar 複製上去並重啟服務；build SHA／時間已烤進 jar，
+**不需要**寫任何 `app.env`。
 
 部署後的驗證方式：
 
@@ -176,7 +175,7 @@ curl http://<vm>:8080/api/info          # buildSha 應為這次 commit 的 SHA
 
 ```powershell
 docker build -t simpleweb:latest .
-docker run --rm -p 8080:8080 -e APP_ENVIRONMENT=test -e APP_BUILD_SHA=a1b2c3d simpleweb:latest
+docker run --rm -p 8080:8080 -e APP_ENVIRONMENT=test simpleweb:latest
 ```
 
 `Dockerfile` 是 multi-stage：build 階段用 `maven:3.9-eclipse-temurin-21`，
@@ -195,16 +194,22 @@ docker run --rm -p 8080:8080 -e APP_ENVIRONMENT=test -e APP_BUILD_SHA=a1b2c3d si
     │   ├── java/money/gh200/simpleweb
     │   │   ├── SimpleWebApplication.java
     │   │   ├── model/AppInfo.java          # 顯示用的資料模型（record）
-    │   │   ├── service/InfoService.java    # 組出 AppInfo 的唯一地方
+    │   │   ├── service/
+    │   │   │   ├── BuildMetadata.java       # 從 classpath 讀出烤進 jar 的 build 資訊
+    │   │   │   └── InfoService.java         # 組出 AppInfo 的唯一地方
     │   │   └── web/
     │   │       ├── HomeController.java     # GET /
     │   │       └── InfoApiController.java  # GET /api/info
     │   └── resources
     │       ├── application.yml
+    │       ├── build-metadata.properties    # Maven filtering 烤入 build SHA/時間
     │       ├── static/css/site.css
     │       └── templates/index.html
     └── test/java/money/gh200/simpleweb
         ├── SimpleWebApplicationIT.java
+        ├── BuildMetadataFilteringTest.java
+        ├── BuildProvenanceOverrideIsolationTest.java
+        ├── service/BuildMetadataTest.java
         ├── service/InfoServiceTest.java
         └── web/HomeControllerTest.java
 ```

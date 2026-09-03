@@ -9,9 +9,6 @@ app:
   name: SimpleWeb
   version: @project.version@
   environment: ${APP_ENVIRONMENT:local}
-  build:
-    sha: ${APP_BUILD_SHA:dev}
-    time: ${APP_BUILD_TIME:unknown}
 
 management:
   endpoints:

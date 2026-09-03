@@ -19,6 +19,10 @@
 	<properties>
 		<java.version>21</java.version>
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+		<!-- Safe defaults; CI overrides with -Dapp.build.sha / -Dapp.build.time so the
+		     provenance is baked into the artifact by resource filtering, not the runtime env. -->
+		<app.build.sha>dev</app.build.sha>
+		<app.build.time>unknown</app.build.time>
 	</properties>
 
 	<dependencies>
@@ -55,10 +59,50 @@
 	<build>
 		<!-- Always produce target/simpleweb.jar: the deployment scripts hardcode this path. -->
 		<finalName>simpleweb</finalName>
+		<!-- Replaces the spring-boot-starter-parent default resource config so that
+		     build-metadata.properties is filtered alongside application*.* (both use the
+		     parent's @...@ delimiter). Build provenance is baked into this dedicated resource
+		     and read straight off the classpath by BuildMetadata, never via the Spring
+		     Environment, so it cannot be overridden by an APP_BUILD_SHA/TIME env var. -->
+		<resources>
+			<resource>
+				<directory>${basedir}/src/main/resources</directory>
+				<filtering>true</filtering>
+				<includes>
+					<include>**/application*.yml</include>
+					<include>**/application*.yaml</include>
+					<include>**/application*.properties</include>
+					<include>build-metadata.properties</include>
+				</includes>
+			</resource>
+			<resource>
+				<directory>${basedir}/src/main/resources</directory>
+				<filtering>false</filtering>
+				<excludes>
+					<exclude>**/application*.yml</exclude>
+					<exclude>**/application*.yaml</exclude>
+					<exclude>**/application*.properties</exclude>
+					<exclude>build-metadata.properties</exclude>
+				</excludes>
+			</resource>
+		</resources>
 		<plugins>
 			<plugin>
 				<groupId>org.springframework.boot</groupId>
 				<artifactId>spring-boot-maven-plugin</artifactId>
+			</plugin>
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-surefire-plugin</artifactId>
+				<configuration>
+					<!-- Surface the Maven build properties (default or -Dapp.build.*) so the
+					     filtering test can assert the generated resource embeds them exactly.
+					     A neutral name is used so this never binds to a Spring app.build.* property. -->
+					<systemPropertyVariables>
+						<expected.build.sha>${app.build.sha}</expected.build.sha>
+						<expected.build.time>${app.build.time}</expected.build.time>
+					</systemPropertyVariables>
+				</configuration>
 			</plugin>
 			<plugin>
 				<groupId>org.apache.maven.plugins</groupId>

@@ -1,11 +1,19 @@
 name: Lab07 Self-hosted Runner
 
 # 只用手動觸發：self-hosted runner 不可以暴露給不受信任的 fork PR。
+#
+# 教/實作 workflow 08 同一台 VM 本機部署的模式：
+#   build（把完整 commit SHA 烤進 artifact）→ 本機安裝並重啟 simpleweb-test（不需要 SSH）
+#   → 本機語義化 exact-SHA smoke test
 on:
   workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  group: simpleweb-deploy
+  cancel-in-progress: false
 
 jobs:
   on-self-hosted:
@@ -25,15 +33,62 @@ jobs:
           java -version 2>&1 || echo "⚠️ 這台 self-hosted runner 沒有安裝 Java"
           git --version || echo "⚠️ 沒有 git"
 
+      # 原 release tag: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+
+      # 原 release tag: actions/setup-java@v6
+      - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      # build 時把完整 commit SHA 與 UTC 時間烤進 artifact，之後由 /api/info 佐證
+      - name: Build and test
+        run: ./mvnw -B verify -Dapp.build.sha="$GITHUB_SHA" -Dapp.build.time="$(date -u +%FT%TZ)"
+
+      # runner 就在目標 VM 上，所以不需要遠端登入；服務檔案在本機安裝後直接重啟。
+      - name: Deploy locally to test service
+        run: |
+          set -euo pipefail
+          sudo install -o simpleweb -g simpleweb -m 0644 target/simpleweb.jar /opt/simpleweb/test/simpleweb.jar
+          sudo systemctl restart simpleweb-test
+          sleep 5
+          sudo systemctl is-active simpleweb-test
+
+      - name: Smoke test（本機驗證 exact SHA）
+        run: |
+          set -euo pipefail
+          body=''
+          for i in $(seq 1 12); do
+            body="$(curl -fsS http://localhost:8080/api/info || true)"
+            actual_sha="$(BODY="$body" python3 -c 'import json, os; print(json.loads(os.environ["BODY"])["buildSha"])' 2>/dev/null || true)"
+            if [ "$actual_sha" = "$GITHUB_SHA" ]; then
+              echo "$body"
+              exit 0
+            fi
+            echo "等待 Spring Boot 啟動... ($i/12)"
+            sleep 5
+          done
+          echo "本機部署沒有回報本次完整 commit SHA：$GITHUB_SHA" >&2
+          echo "最後回應：$body" >&2
+          exit 1
+
       - name: Summary
+        if: always()
         run: |
           {
-            echo "## Lab07 Self-hosted runner"
+            echo "## Lab07 Self-hosted runner 本機部署"
             echo ""
             echo "- Runner name: \`${RUNNER_NAME:-unknown}\`"
             echo "- Hostname: \`$(hostname)\`"
             echo "- Labels: self-hosted, Linux, X64, gh200"
+            echo "- Service: \`simpleweb-test\`（port 8080，本機安裝並重啟，不經過 SSH）"
+            echo "- Build SHA: \`${GITHUB_SHA}\`"
             echo ""
-            echo "> GitHub 託管 runner 每次都是全新的乾淨機器；"
-            echo "> self-hosted runner 的狀態會保留，工具要自己裝、也要自己清。"
+            echo "> ⚠️ 五個安全邊界：(1) 同一台 VM 上 runner 與部署目標共用只是課堂簡化；"
+            echo "> (2) 這條路徑全程零 inbound SSH；(3) 正式環境應把 runner 與正式主機分開；"
+            echo "> (4) 絕不能讓不受信任的 fork PR 使用這個 runner；"
+            echo "> (5) GitHub 不會把 job 派給 30 天內沒有更新 runner application 的 runner。"
           } >> "$GITHUB_STEP_SUMMARY"

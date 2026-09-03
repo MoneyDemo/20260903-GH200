@@ -5,6 +5,10 @@
 #
 # ⚠️ 安全提醒：self-hosted runner 絕對不可以用來執行不受信任的 fork PR。
 #    這個 workflow 只使用 workflow_dispatch，不要加上 pull_request 觸發。
+#
+# 這個 lab 教/實作 workflow 08 同一台 VM 本機部署的模式：
+#   build（把完整 commit SHA 烤進 artifact）→ 本機安裝並重啟 simpleweb-test（不需要 SSH）
+#   → 本機語義化 exact-SHA smoke test
 # ---------------------------------------------------------------------------
 
 name: Lab07 Self-hosted Runner
@@ -14,6 +18,10 @@ on:
 
 permissions:
   contents: read
+
+concurrency:
+  group: simpleweb-deploy
+  cancel-in-progress: false
 
 jobs:
   on-self-hosted:
@@ -34,4 +42,23 @@ jobs:
       #   如果這一步失敗，那正是這個 lab 想讓你體會的重點。
       #   （可以用 `java -version || echo "這台機器沒有 Java"`）
 
-      # TODO 4: 把 runner 的環境資訊寫進 $GITHUB_STEP_SUMMARY
+      # TODO 4: actions/checkout，釘選成不可變 SHA（原 tag @v5；persist-credentials: false）
+      #   uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      # TODO 5: actions/setup-java，釘選成不可變 SHA（原 tag @v6；distribution: temurin, java-version: '21'）
+      #   uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c
+
+      # TODO 6: Build 時把完整 commit SHA 與 UTC 時間烤進 artifact：
+      #   ./mvnw -B verify -Dapp.build.sha="$GITHUB_SHA" -Dapp.build.time="$(date -u +%FT%TZ)"
+
+      # TODO 7: 本機部署到 test 服務——runner 就在目標 VM 上，不需要遠端登入：
+      #   sudo install -o simpleweb -g simpleweb -m 0644 target/simpleweb.jar /opt/simpleweb/test/simpleweb.jar
+      #   sudo systemctl restart simpleweb-test
+      #   sudo systemctl is-active simpleweb-test
+
+      # TODO 8: 語義化 exact-SHA smoke test：
+      #   curl http://localhost:8080/api/info，解析 JSON 取出 buildSha，
+      #   比對是否等於 $GITHUB_SHA（不是只看 HTTP 200）
+
+      # TODO 9: 把 runner 的環境資訊「與」五個安全邊界寫進 $GITHUB_STEP_SUMMARY
+      #   五個安全邊界：同一台 VM 只是課堂簡化、零 inbound SSH、正式環境要分離
+      #   runner 與正式主機、絕不服務不受信任的 fork PR、30 天未更新的 runner 拿不到 job
