@@ -11,8 +11,12 @@
 - 說明 GitHub 託管 runner 與 self-hosted runner 的差異與各自適用情境
 - 在一台 Linux VM 上註冊一個 self-hosted runner，並加上自訂 label
 - 用 `runs-on:` 搭配多個 label 精準指定要跑在哪一台機器
+- 實作 workflow 08 教的**同一台 VM 本機部署**模式：build 時把完整 commit SHA 烤進 artifact、
+  在本機安裝並重啟 `simpleweb-test`、用本機 `curl` 驗到 exact-SHA 的語義化 smoke test
 - 說明 runner group 與組織政策在企業中扮演的角色
-- **說出 self-hosted runner 最大的安全風險，以及為什麼絕不能服務不受信任的 fork PR**
+- **完整說出 self-hosted runner 的五個安全邊界**：同一台 VM 上 runner 與部署目標共用只是課堂簡化、
+  這條路徑全程零 inbound SSH、正式環境應把 runner 與部署目標分開、絕不能服務不受信任的
+  fork PR、以及 GitHub 不會把 job 派給 30 天內沒有更新 runner application 的 runner
 - 用完之後把 runner 乾淨地移除
 
 ## 對應模組
@@ -24,7 +28,8 @@
 - 已完成 [Lab 01](lab01-first-workflow.md)
 - 講師提供 VM 的 SSH 連線方式（帳號與 `<VM_PUBLIC_IP>`，課堂上公布）
 - 你對該 repo 有管理權限（註冊 runner 需要）
-- ⚠️ 這台 VM 同時跑著 `simpleweb-test` 與 `simpleweb-prod`，**請勿停用或更動這兩個服務**
+- ⚠️ 這台 VM 也跑著 `simpleweb-prod`（正式環境）——**這個 lab 只會重啟 `simpleweb-test`**
+  （這是本 lab 的教學重點，同 workflow 08），**絕對不要**去停用或更動 `simpleweb-prod`
 
 ## 步驟
 
@@ -86,13 +91,45 @@
 
 10. **感受一下差別：** 再加一個 step 執行 `java -version`。GitHub 託管的 Ubuntu runner 預裝了 JDK，這台 VM 可能沒有。如果失敗了——那正是這個 lab 想讓你體會的重點：**self-hosted 的環境要自己準備。**
 
-11. **手動觸發**（這個 workflow 只有 `workflow_dispatch`），同時觀察 SSH 視窗中 `./run.sh` 的輸出，你會看到它即時接到 job 並執行。
+11. **補上 workflow 08 教的「同一台 VM 本機部署」流程：**
+    - `actions/checkout@v5`（`persist-credentials: false`）+ `actions/setup-java@v6`（temurin、21）
+    - **Build 時把完整 commit SHA 與 UTC 時間烤進 artifact：**
+      ```bash
+      ./mvnw -B verify -Dapp.build.sha="$GITHUB_SHA" -Dapp.build.time="$(date -u +%FT%TZ)"
+      ```
+    - **本機部署（不需要遠端登入，因為 runner 就在目標 VM 上）：**
+      ```bash
+      sudo install -o simpleweb -g simpleweb -m 0644 target/simpleweb.jar /opt/simpleweb/test/simpleweb.jar
+      sudo systemctl restart simpleweb-test
+      sudo systemctl is-active simpleweb-test
+      ```
+      這條路徑**完全不需要 SSH key**，因為建置與部署發生在同一台機器上——這正是
+      self-hosted runner 在「內網部署」情境下的價值：省掉一段網路連線。
+    - **語義化 exact-SHA smoke test：** 打 `http://localhost:8080/api/info`，解析 JSON 取出
+      `buildSha`，比對是否等於 `$GITHUB_SHA`（不是只看 HTTP 200，而是驗證「真的是這次
+      commit 的版本」——回應更新的舊版本 jar 內容一樣會回 200，但 SHA 會對不上）。
+    - 把 runner 名稱、hostname、service 名稱與這次的 build SHA 寫進 `$GITHUB_STEP_SUMMARY`。
+
+12. **手動觸發**（這個 workflow 只有 `workflow_dispatch`），同時觀察 SSH 視窗中 `./run.sh` 的輸出，你會看到它即時接到 job、build、本機部署，並回報 smoke test 結果。
 
 ### D. ⚠️ 安全：這一段一定要讀
 
 **Self-hosted runner 最大的風險：任何能讓 workflow 在上面執行的人，等同於可以在你的機器上執行任意程式碼。**
 
+這個 lab 的本機部署路徑必須守住以下**五個安全邊界**：
+
+1. **同一台 VM 只是課堂簡化。** runner 和部署目標（`simpleweb-test`）共用同一台機器，是為了讓課堂
+   demo 簡單；正式環境**應該把 runner 和實際要部署的正式主機分開**，避免 runner 一旦被入侵就等於
+   直接拿到正式主機權限。
+2. **這條路徑全程零 inbound SSH。** 建置與部署都發生在 runner 本機，不需要對外開放任何 SSH 埠、
+   也不需要 `VM_SSH_PRIVATE_KEY` 這類長期憑證——這是它和 workflow 04-06 的 SSH 路徑最大的差異。
+3. **絕對不要**讓 self-hosted runner 執行來自 fork 的 pull request（見下方第 1 點細節）。
+4. **狀態會殘留**，需要額外的清理紀律（見下方第 2 點細節）。
+5. **GitHub 不會把 job 派給 30 天內沒有更新 runner application 的 runner**——這是治理上的
+   一個保護機制，逼你保持 runner 版本更新。
+
 具體來說：
+
 
 1. **絕對不要**讓 public repo 的 self-hosted runner 執行來自 fork 的 pull request。
    任何陌生人 fork 你的 repo、在 workflow 裡塞一行惡意指令、發一個 PR，那行指令就會在你的內網機器上執行。GitHub 的官方文件對這一點有非常明確的警告。
@@ -116,17 +153,17 @@
 
 **做完一定要移除**，否則這台機器會一直掛在別人的 repo 上。
 
-12. 在 SSH 視窗按 `Ctrl+C` 停掉 `./run.sh`。
+13. 在 SSH 視窗按 `Ctrl+C` 停掉 `./run.sh`。
 
-13. 回到 GitHub Runners 頁面取得移除用的 token，然後在 VM 上執行：
+14. 回到 GitHub Runners 頁面取得移除用的 token，然後在 VM 上執行：
     ```bash
     ./config.sh remove --token <畫面上給你的移除 token>
     ```
     （若你先前有安裝成服務，要先 `sudo ./svc.sh stop` 再 `sudo ./svc.sh uninstall`。）
 
-14. 確認 GitHub 的 Runners 清單中已經看不到你的 runner。
+15. 確認 GitHub 的 Runners 清單中已經看不到你的 runner。
 
-15. 刪除你自己建立的那個目錄：
+16. 刪除你自己建立的那個目錄：
     ```bash
     cd ~ && rm -rf ~/actions-runner-<你的名字>
     ```
@@ -153,7 +190,14 @@ jobs:
     steps:
       # TODO 2: 印出 hostname / uname -a / whoami / RUNNER_NAME / RUNNER_OS
       # TODO 3: java -version（失敗也沒關係，重點是體會差異）
-      # TODO 4: 把環境資訊寫進 $GITHUB_STEP_SUMMARY
+      # TODO 4: actions/checkout@v5（persist-credentials: false）+ actions/setup-java@v6（temurin / '21'）
+      # TODO 5: Build 時把完整 commit SHA 與 UTC 時間烤進 artifact：
+      #   ./mvnw -B verify -Dapp.build.sha="$GITHUB_SHA" -Dapp.build.time="$(date -u +%FT%TZ)"
+      # TODO 6: 本機部署（不需要 SSH，runner 就在目標 VM 上）：
+      #   sudo install ... target/simpleweb.jar /opt/simpleweb/test/simpleweb.jar
+      #   sudo systemctl restart simpleweb-test，再確認 is-active
+      # TODO 7: 語義化 smoke test：curl http://localhost:8080/api/info，驗到 buildSha == $GITHUB_SHA
+      # TODO 8: 把環境資訊「與」五個安全邊界寫進 $GITHUB_STEP_SUMMARY
 ```
 
 ## 驗收標準
@@ -162,8 +206,12 @@ jobs:
 - [ ] 手動觸發後，job 成功執行且顯示**綠色勾勾**
 - [ ] log 中的 `hostname` 是那台 VM，**不是** GitHub 託管 runner 的名稱
 - [ ] 你在 SSH 視窗中親眼看到 runner 接到 job
-- [ ] Job Summary 顯示 runner 名稱與 hostname
+- [ ] `simpleweb-test`（port 8080）在本機被重新安裝並重啟，**不經過 SSH**
+- [ ] smoke test 驗到 `/api/info` 的 `buildSha` 等於這次觸發的完整 commit SHA
+- [ ] Job Summary 顯示 runner 名稱、hostname，以及五個安全邊界的說明
 - [ ] 你能說出「為什麼這個 workflow 不能加上 `pull_request` 觸發」
+- [ ] 你能完整說出五個安全邊界：同一台 VM 只是課堂簡化、零 inbound SSH、正式環境要分離
+      runner 與正式主機、絕不服務不受信任的 fork PR、30 天未更新的 runner 拿不到 job
 - [ ] **收尾完成**：runner 已從 GitHub 移除，VM 上你建立的目錄已刪除
 - [ ] `simpleweb-test` 與 `simpleweb-prod` 兩個服務仍然正常（`:8080`、`:8081` 都還通）
 
@@ -179,6 +227,9 @@ jobs:
 | `java: command not found` | self-hosted 沒有預裝工具 | 這是預期的；正式用途要自己裝，或在 workflow 中用 `setup-java` |
 | 同學之間互相搶到 job | 大家用同一個 label | label 加上自己的名字做區隔 |
 | 做完忘了移除 runner | — | 一定要完成收尾步驟 |
+| `sudo install` 說 permission denied | runner 服務帳號沒有對 `/opt/simpleweb/test` 的 sudo 權限 | 這是 VM 上既有的權限設定，確認你用的是講師配置好的帳號，不要自己改權限 |
+| smoke test 打 `:8080` 一直連不上 | `simpleweb-test` 沒有成功重啟，或 build 失敗 | 檢查 `Build and test` step 的輸出，以及 `systemctl is-active simpleweb-test` |
+| smoke test 顯示的 `buildSha` 是舊版本 | 部署 step 沒有真的覆蓋到 `/opt/simpleweb/test/simpleweb.jar` | 確認目標路徑打對，而且是 `test` 不是 `prod` |
 
 ## 解答
 
