@@ -2,34 +2,32 @@
 # ---------------------------------------------------------------------------
 # GH-200 學員環境快速設定（Linux / macOS）
 #
-# 這個腳本會：
+# 這個腳本只負責把你自己的「CI / YAML 練習」環境準備好：
 #   1. 檢查前置工具：git / gh / java (>= 21)
 #   2. 檢查 gh 是否已登入
 #   3. 把課程 repo fork 到你自己的帳號（已存在就沿用），並 clone 到本機
 #   4. 在你的 fork 上啟用 GitHub Actions
-#   5. 建立 test 與 production 兩個 environment
-#   6. （選用）設定 VM SSH 部署用的「非機密」variables
-#   7. 印出下一步
+#   5. 建立 test 與 production 兩個 environment（供 YAML 對照用）
+#   6. 印出下一步
 #
-# 安全性：不刪除任何檔案、不使用萬用字元、不覆寫既有目錄、不硬編 token。
-#   SSH 私鑰是機密，本腳本不接收私鑰參數；請由講師以
-#   `gh secret set VM_SSH_PRIVATE_KEY --env test --repo <repo> < id_deploy`
-#   （並對 production 各設一份 Environment secret，不是 repository secret）另外設定。
+# 範圍與邊界（重要）：
+#   - 你的 fork 用於 Lab 01–03 與 Lab 06 的 CI / YAML 練習，可維持 private。
+#   - 本腳本不會、也不應該發放任何部署憑證或雲端身分：不設定 VM 的 SSH 私鑰、
+#     host key、public IP、SSH 使用者，也不設定任何 Azure 身分。
+#   - Lab 04／05 的實際部署與 production 核准關卡，是講師在 class repo 實跑、學員觀察的示範；
+#     學員在自己的 fork 只做 YAML 撰寫與 review，不會拿到課程 VM 金鑰。
+#   - Lab 07（self-hosted runner）是觀察／設計練習，學員不註冊 runner、不連課程 VM。
+#
+# 安全性：不刪除任何檔案、不使用萬用字元、不覆寫既有目錄、不硬編 token、
+#   不接收或散布任何私鑰或雲端身分。
 #
 # 用法：
 #   ./setup-student-repo.sh
-#   VM_PUBLIC_IP=<VM_PUBLIC_IP> VM_SSH_USER=<USER> VM_SSH_HOST_KEY="<known_hosts 條目>" \
-#     ./setup-student-repo.sh
 # ---------------------------------------------------------------------------
 set -euo pipefail
 
 UPSTREAM_REPO="${UPSTREAM_REPO:-MoneyDemo/20260903-GH200}"
 TARGET_DIR="${TARGET_DIR:-$HOME/gh200}"
-
-# 選用（講師在課堂上公布後再填；皆為非機密）
-VM_PUBLIC_IP="${VM_PUBLIC_IP:-}"
-VM_SSH_USER="${VM_SSH_USER:-}"
-VM_SSH_HOST_KEY="${VM_SSH_HOST_KEY:-}"
 
 C_CYAN=$'\033[36m'; C_GREEN=$'\033[32m'; C_YELLOW=$'\033[33m'; C_OFF=$'\033[0m'
 step() { printf '\n%s==> %s%s\n' "$C_CYAN" "$1" "$C_OFF"; }
@@ -124,10 +122,10 @@ gh api --method PUT "repos/$MY_REPO/actions/permissions" \
   -F enabled=true >/dev/null \
   || die "Actions 啟用失敗，請確認你對該 repo 有 admin 權限。"
 ok "Actions 已啟用（保留既有 allowed-actions policy）"
-echo "    註：SSH 部署不需要 public repo，你的 fork 可維持 private。"
+echo "    註：你的 fork 用於 Lab 01–03／06 的 CI/YAML 練習，可維持 private。"
 
 # ---------------------------------------------------------------------------
-# 6. 建立 environments
+# 6. 建立 environments（供 Lab 04/05 的 YAML 對照；實際部署由講師示範）
 # ---------------------------------------------------------------------------
 step "建立 environments：test / production"
 
@@ -137,31 +135,10 @@ for env_name in test production; do
     || die "建立 environment '$env_name' 失敗。"
   ok "environment '$env_name' 就緒"
 done
-warn "production 的 required reviewer 需要你自己在 repo 設定頁加上（Lab 05 會用到）"
+warn "Lab 04／05 的實際部署與 production 核准關卡由講師在 class repo 實跑、學員觀察；這兩個 environment 只是讓你的 YAML 能對照，學員不需自行設定部署憑證或 reviewer。"
 
 # ---------------------------------------------------------------------------
-# 7. 選用：非機密 variables（沒填的會跳過）
-# ---------------------------------------------------------------------------
-step "設定 variables（沒填的會跳過）"
-
-set_variable() {
-  local name="$1" value="$2"
-  if [ -z "$value" ]; then warn "variable $name 未提供，跳過"; return 0; fi
-  gh variable set "$name" --repo "$MY_REPO" --body "$value" \
-    || die "設定 variable $name 失敗。"
-  ok "variable $name 已設定"
-}
-
-set_variable VM_PUBLIC_IP    "$VM_PUBLIC_IP"
-set_variable VM_SSH_USER     "$VM_SSH_USER"
-set_variable VM_SSH_HOST_KEY "$VM_SSH_HOST_KEY"
-
-warn "SSH 私鑰是機密，本腳本不接收私鑰參數。請由講師設成 test/production 的 Environment secret（不是 repository secret）："
-warn "    gh secret set VM_SSH_PRIVATE_KEY --env test --repo $MY_REPO < id_deploy"
-warn "    gh secret set VM_SSH_PRIVATE_KEY --env production --repo $MY_REPO < id_deploy"
-
-# ---------------------------------------------------------------------------
-# 8. 下一步
+# 7. 下一步
 # ---------------------------------------------------------------------------
 step "完成！接下來要做的事"
 
@@ -174,16 +151,10 @@ cat <<EOF
          ./mvnw -B verify
      成功後應該會產生 target/simpleweb.jar
   3. 打開 labs/README.md，從 Lab 01 開始
-  4. 講師確認你的 fork 已配置好對應的 VM SSH 存取後，才設定部署用的 variables：
-         gh variable set VM_PUBLIC_IP    --repo $MY_REPO --body "<VM_PUBLIC_IP>"
-         gh variable set VM_SSH_USER     --repo $MY_REPO --body "<USER>"
-         gh variable set VM_SSH_HOST_KEY --repo $MY_REPO --body "<known_hosts 條目>"
-     私鑰請由講師設成 test/production 的 Environment secret（不要放進指令列參數）：
-         gh secret set VM_SSH_PRIVATE_KEY --env test --repo $MY_REPO < id_deploy
-         gh secret set VM_SSH_PRIVATE_KEY --env production --repo $MY_REPO < id_deploy
-     （兩個 Environment 都設好、default branch 的 04/05/06 實跑成功後，才由講師另外刪除舊的 repo 層級 secret）
-  5. Lab 05 之前，記得到 repo 設定 > Environments > production
-     加上 required reviewer（把你自己加進去即可）
-  6. Lab 04／05 預設由講師在 class repo 實跑；fork 若沒有專屬的部署金鑰，
-     你仍要完成 YAML，但不要共用講師的私鑰。
+  4. Lab 01–03、06 在你自己的 fork 實作並執行（純 CI / YAML / 除錯）。
+  5. Lab 04／05 是「設計 + 觀察」：你在 fork 撰寫並 review 部署 YAML，
+     實際的 test/prod 部署與 production 核准由講師在 class repo 示範。
+     你不會、也不需要拿到課程 VM 的 SSH 私鑰、host key、IP 或任何 Azure 身分。
+  6. Lab 07（self-hosted runner）是觀察／設計練習：觀察講師在私有 MoneyYu/GH-200 的
+     08 執行，學員不註冊 runner、不連課程 VM。
 EOF

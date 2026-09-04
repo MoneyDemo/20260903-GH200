@@ -1,4 +1,12 @@
-# Lab 04 — 部署到 test 環境（SSH 到 on-prem VM）
+# Lab 04 — 部署到 test 環境（SSH 到 on-prem VM）｜設計 + 觀察
+
+## 這個 lab 的定位：設計 + 觀察（學員不實跑部署）
+
+> **Lab 04 是「設計 + 審查」練習。** VM 的 SSH 私鑰是可 sudo 的長期憑證，只由講師保管；
+> **學員不會拿到課程 VM 的 SSH 私鑰、host key、public IP 或任何 Azure 身分**，也不需要在自己
+> 的 fork 上設定這些。你要做的是**自己把部署 YAML 寫出來、讓講師 review**，並**觀察講師在
+> class repo（`MoneyDemo/20260903-GH200`）實跑、已驗證的 `04` 部署 run 與其 log**，對照它如何
+> 完成 test 環境部署。真正的 test/prod 部署由講師示範。
 
 ## 學習目標
 
@@ -20,21 +28,14 @@
 
 ## 前置需求
 
-> **預設由講師實跑。** VM 的 SSH 私鑰是長期憑證，且每個 fork 都需要講師配置；未獲授權時，
-> 請完成 YAML 並對照講師的實際 workflow log，不要要求或共用長期私鑰。
-
 - 已完成 [Lab 03](lab03-package-artifact.md)
-- 你的 repo 已建立 GitHub Environment：**`test`**（`scripts/setup-student-repo.*` 會幫你建）
-- 你的 repo 已設定下列 **variables**（講師提供實際值）：
-  - `VM_PUBLIC_IP` ← **課堂上才會拿到，講義中一律寫 `<VM_PUBLIC_IP>`**
-  - `VM_SSH_USER` ← VM 上的部署帳號
-  - `VM_SSH_HOST_KEY` ← VM 的 SSH 主機公鑰（釘選用的完整 `known_hosts` 條目）
-- 你的 repo 已設定下列 **Environment secret**（講師提供；分別設在 `test` 與 `production` 兩個
-  Environment，**不要**放成 repository secret）：
-  - `VM_SSH_PRIVATE_KEY` ← 部署用的 SSH 私鑰。它可 sudo、又是長期憑證，設成 Environment
-    secret 後只有綁定 `test`／`production` 的 job 讀得到，任意分支的 job 讀不到
+- 能開啟講師分享的 class repo `04` 部署 run 頁面與 log 來觀察
+- 你在自己的 fork 只撰寫／檢視 YAML；YAML 中引用的 `${{ vars.VM_PUBLIC_IP }}`、
+  `${{ vars.VM_SSH_HOST_KEY }}`、`${{ secrets.VM_SSH_PRIVATE_KEY }}` 等，都是**設計上的名稱佔位**，
+  由講師在 class repo 端配置，**學員不需要、也不會拿到實際值**
 
-> ⚠️ **VM 的 public IP 目前未知。** 本講義所有地方都以 `<VM_PUBLIC_IP>` 或 `${{ vars.VM_PUBLIC_IP }}` 表示，講師會在課堂上公布實際 IP，請把它設定成 repository variable，**不要**寫死在 YAML 裡。
+> ⚠️ 講義中 VM 的 public IP 一律以 `<VM_PUBLIC_IP>` 或 `${{ vars.VM_PUBLIC_IP }}` 表示；
+> 這是**設計佔位**，學員不需要填入真實 IP，也不需要把它設定成自己的 repository variable。
 
 ### 目標環境契約（不可更動）
 
@@ -113,9 +114,9 @@ Maven resource filtering 烤進 jar，由應用程式直接從 classpath 讀出�
 
    > 只檢查 HTTP 200 是不夠的：舊版本還活著時一樣回 200，會讓失敗的部署變成假的綠燈。
 
-8. **Push 並觀察。** 在 run 頁面你應該看到 `build` job 完成後 `deploy-test` job 標示著 environment `test`，完成後出現指向 `http://<VM_PUBLIC_IP>:8080/` 的連結。
+8. **觀察講師示範 run。** 在講師 class repo 的 `04` run 頁面，你應該看到 `build` job 完成後 `deploy-test` job 標示著 environment `test`，完成後出現指向 `http://<VM_PUBLIC_IP>:8080/` 的連結。對照你自己寫的 YAML，確認結構一致。
 
-9. **用瀏覽器驗證。** 開啟 `http://<VM_PUBLIC_IP>:8080/`，頁面上應顯示 environment 為 `test`、以及這次的 build SHA。再看 `http://<VM_PUBLIC_IP>:8080/api/info` 的 JSON。
+9. **對照瀏覽器驗證（觀察）。** 由講師開啟 `http://<VM_PUBLIC_IP>:8080/`，頁面上應顯示 environment 為 `test`、以及該次的 build SHA；再看 `http://<VM_PUBLIC_IP>:8080/api/info` 的 JSON。**學員不需自行連線或部署。**
 
 ### 對照：為什麼還要學 07 的 App Service + OIDC？
 
@@ -153,16 +154,17 @@ jobs:
       # TODO: smoke test，驗 /api/info 的 buildSha == github.sha
 ```
 
-## 驗收標準
+## 驗收標準（設計 + 觀察）
 
-- [ ] `build` job 上傳了名為 **`simpleweb-jar`** 的 artifact，`deploy-test` job 成功下載
+- [ ] 你完成了 `lab04-deploy-test.yml` 的 YAML，且通過講師 review
+- [ ] `build` job 上傳名為 **`simpleweb-jar`** 的 artifact，`deploy-test` job 以 `download-artifact` 取回
 - [ ] `build` job 的步驟中**沒有**注入 `VM_SSH_PRIVATE_KEY`（私鑰只出現在 deploy job）
-- [ ] Actions run 中 `deploy-test` job 顯示**綠色勾勾**，且標示 environment `test`
-- [ ] SSH 相關的 step 都使用了 `StrictHostKeyChecking=yes` 與釘選的 `UserKnownHostsFile`
+- [ ] SSH 相關的 step 都使用 `StrictHostKeyChecking=yes` 與釘選的 `UserKnownHostsFile`，並以 `vars.VM_SSH_HOST_KEY` 釘選指紋（不是 `ssh-keyscan`）
 - [ ] 清理私鑰的 step 帶有 `if: always()`
-- [ ] smoke test step 成功，`curl` 對 `:8080/api/info` 取得的 `buildSha` **等於這次 commit SHA**
-- [ ] 瀏覽器開 `http://<VM_PUBLIC_IP>:8080/`，頁面顯示 **environment = test**
-- [ ] job 頁面上出現指向 test 環境的連結
+- [ ] smoke test 以 `/api/info` 的 `buildSha == github.sha` 判斷成功，而不是只看 HTTP 200
+- [ ] 你**觀察**了講師 class repo 的 `04` run：`deploy-test` 綠燈、標示 environment `test`，`:8080` 顯示 **environment = test** 且 build SHA 與該次 commit 相符
+- [ ] 你能說出為什麼要把 build 與 deploy 拆成兩個 job（私鑰只給 deploy job）
+- [ ] 你能說出為什麼要釘選主機指紋、而不是用 `ssh-keyscan`
 
 ## 常見錯誤
 

@@ -1,37 +1,37 @@
-# Lab 07（選修 / 進階）— Self-hosted runner
+# Lab 07（選修 / 觀察與設計）— Self-hosted runner
 
-> 這個 lab 是**選修，且預設由講師實跑（instructor-run）**。self-hosted runner 的註冊需要
-> SSH 進課程 VM，而該 VM 的 TCP/22 只允許來源 `AzureCloud`——**學員自己的筆電不在
-> `AzureCloud` 範圍內，無法（也不應該）直接 SSH**。因此 runner 的註冊與移除由**講師從
-> Azure Cloud Shell**（或其他 NSG 明確允許、受信任的管理連線）完成；學員在旁觀察，
-> 專注在 `runs-on:` 標籤與 self-hosted runner 的安全邊界。
-> **絕對不要為了連線而把 VM 的 22 埠對整個 Internet 開放。**
+> 這個 lab 是**選修，而且是「觀察 + 設計」而非動手註冊 runner**。
+> 學員**不會**、也**不需要**在任何機器上註冊 self-hosted runner，**不會**以 SSH 連入課程 VM，
+> 也**不需要**對課程 VM 有任何存取權。你要做的是：**讀懂** self-hosted runner 的 YAML 與
+> 安全邊界，並**觀察講師在私有 `MoneyYu/GH-200` 上實跑的 same-VM runner demo**。
 
-> 🔒 **Runner 常駐邊界（安全）：** public class repo `MoneyDemo/20260903-GH200` 本身**不註冊任何
-> self-hosted runner**，其 `08.selfhosted-runner` 以
-> `github.event.repository.visibility == 'private'` **fail-closed**，在 public upstream 一律略過
-> （skip）；只有各自「**私有**」的課程 repo 複本（private copy——以 clone／import 建立的私有
-> repo，**不是** public repo 的 network fork，因為那種 fork 仍是 public、會被同一條件正確略過）
-> 才會用自己隔離的 runner 執行。課堂上實際的 M4 demo 由講師在**私有的 `MoneyYu/GH-200`** 上、用
-> 其**常駐**的 self-hosted runner（常駐課程基礎設施，示範後**不移除**、runner 數不歸零）進行。本
-> lab 下面的「註冊 → 練習 → 移除」流程，指的是**你在自己私有複本上建立的臨時 runner** 的收尾
-> 清理，與講師那台常駐 runner 是兩回事。
+> 🔒 **這條路徑的信任邊界（安全）：**
+> - **課堂唯一的 live same-VM runner demo，只由講師在私有的 `MoneyYu/GH-200` 上，用其
+>   「常駐」的 self-hosted runner 進行**（那台 runner 是常駐課程基礎設施，示範後不移除、
+>   runner 數不歸零）。
+> - **本 public class repo `MoneyDemo/20260903-GH200` 的 `08.selfhosted-runner` 是「惰性參考
+>   範本」**：它的 job 以字面 `if: ${{ false }}` **永遠跳過**，在本 repo 與**任何**學員 fork 或
+>   私有複本上都不會執行。它存在的目的只是讓你**閱讀與設計討論**，不是拿來跑的。
+> - **共用的課程 VM 只由講師管理。** 任何學員的 public 或 private fork／複本都**不得**把 runner
+>   指向這台共用 VM，也不得為了讓 `08` 或本 lab「跑起來」而在其上註冊 runner。
+> - 若你想在課後**自己動手**體驗（見文末「選修：課後的隔離實驗」），必須用**另一台你自己、
+>   經講師同意的隔離機器**與**另一個你自己擁有的獨立 private repository**——**絕不**使用課程
+>   VM、課程 repo 或其 fork。
 
 ## 學習目標
 
 做完這個 lab，你應該可以：
 
 - 說明 GitHub 託管 runner 與 self-hosted runner 的差異與各自適用情境
-- 在一台 Linux VM 上註冊一個 self-hosted runner，並加上自訂 label
-- 用 `runs-on:` 搭配多個 label 精準指定要跑在哪一台機器
-- 實作 workflow 08 教的**同一台 VM 本機部署**模式：build 時把完整 commit SHA 烤進 artifact、
-  在本機安裝並重啟 `simpleweb-test`、用本機 `curl` 驗到 exact-SHA 的語義化 smoke test
-- 說明 runner group 與組織政策在企業中扮演的角色
+- **讀懂** `runs-on:` 如何用多個 label 精準指定要跑在哪一台機器
+- 讀懂 workflow 08 教的**同一台 VM 本機部署**模式（build 時把完整 commit SHA 烤進 artifact、
+  在本機安裝並重啟 `simpleweb-test`、用本機 `curl` 驗到 exact-SHA 的語義化 smoke test），
+  並說明為什麼這條路徑**全程零 inbound SSH**
 - **完整說出 self-hosted runner 的五個安全邊界**：同一台 VM 上 runner 與部署目標共用只是課堂簡化、
   這條路徑全程零 inbound SSH、正式環境應把 runner 與部署目標分開、絕不能服務不受信任的
   fork PR、以及 GitHub 不會把 job 派給 30 天內沒有更新 runner application 的 runner
-- 用完之後把**你自己私有 repo 複本（private copy，非 public fork）上建立的臨時 runner** 乾淨地移除（講師在私有 `MoneyYu/GH-200`
-  上的常駐 runner 不在此列，屬常駐課程基礎設施、示範後不移除）
+- 說明 runner group 與組織政策在企業中扮演的角色
+- **觀察**講師在私有 `MoneyYu/GH-200` 上的 `08` 執行與 log，並對照上述邊界
 
 ## 對應模組
 
@@ -39,13 +39,11 @@
 
 ## 前置需求
 
-- 已完成 [Lab 01](lab01-first-workflow.md)
-- **runner 註冊由講師從 Azure Cloud Shell（或其他 NSG 允許的受信任管理連線）執行**；
-  學員不需要、也無法從自己的筆電 SSH 進這台 VM（22 埠只開放來源 `AzureCloud`），
-  **切勿為了連線而把 22 埠對整個 Internet 開放**
-- 你對該 repo 有管理權限（用來在 GitHub UI 觀察 runner 狀態）
-- ⚠️ 這台 VM 也跑著 `simpleweb-prod`（正式環境）——**這個 lab 只會重啟 `simpleweb-test`**
-  （這是本 lab 的教學重點，同 workflow 08），**絕對不要**去停用或更動 `simpleweb-prod`
+- 已完成 [Lab 01](lab01-first-workflow.md)（理解 workflow / job / step 的基礎）
+- 能開啟本 repo 的 [`starters/lab07.yml`](starters/lab07.yml)、[`solutions/lab07.yml`](solutions/lab07.yml)
+  與 [`.github/workflows/08.selfhosted-runner.yml`](../.github/workflows/08.selfhosted-runner.yml) 閱讀
+- 課堂上能看到講師分享的 `MoneyYu/GH-200` `08` run 頁面與 log
+- **不需要**：課程 VM 的存取權、runner 註冊權限、SSH 連線、任何長期憑證
 
 ## 步驟
 
@@ -62,113 +60,79 @@
 
 企業選擇 self-hosted 最常見的理由是：**要連進防火牆內的資料庫、成品庫或部署目標**。
 
-### B. 註冊 runner（講師從 Azure Cloud Shell 執行；學員觀察）
+### B. 讀懂參考範本的 YAML（設計）
 
-> 以下註冊步驟由**講師**在 **Azure Cloud Shell**（來源屬於 `AzureCloud`，NSG 允許）或其他
-> 受信任的管理連線上完成。學員的筆電無法 SSH 進這台 source-restricted 的 VM，**也不要**
-> 為此開放 22 埠；學員可在 GitHub UI 觀察 runner 從註冊到 Idle 的狀態變化。
+打開三份**唯讀參考**檔案，對照著讀——**不要**把它們複製出去跑，也不要註冊 runner：
 
-1. 到 repo 的設定頁，找到 Actions 底下的 Runners，選擇新增 self-hosted runner，平台選 **Linux x64**。
+- [`starters/lab07.yml`](starters/lab07.yml)：帶 `# TODO:` 的設計骨架
+- [`solutions/lab07.yml`](solutions/lab07.yml)：完整的參考寫法
+- [`.github/workflows/08.selfhosted-runner.yml`](../.github/workflows/08.selfhosted-runner.yml)：
+  課堂用的惰性參考範本（`if: ${{ false }}`，永遠跳過）
 
-2. GitHub 會產生一段**專屬、有時效性的**指令。內容大致是：下載 runner 套件 → 驗證雜湊 → 解壓縮 → 執行設定。**請直接照抄畫面上的指令**，不要用講義裡的版本號（runner 版本會一直更新）。
+閱讀時請在紙上或你自己的設計筆記中回答：
 
-3. 講師從 Azure Cloud Shell SSH 進 VM，在家目錄底下建立獨立目錄再操作，例如：
-   ```bash
-   mkdir -p ~/actions-runner-<你的名字> && cd ~/actions-runner-<你的名字>
-   ```
-   > 每位學員各自一個目錄，不要互相覆蓋。
-
-4. 執行設定時**加上自訂 label**：
-   ```bash
-   ./config.sh --url https://github.com/<your-account>/<your-repo> \
-               --token <畫面上給你的 token> \
-               --labels gh200 \
-               --unattended
-   ```
-   - `--labels` 加上去的是**額外**標籤；`self-hosted`、`Linux`、`X64` 這幾個是自動加上的
-   - runner 名稱建議也帶上你的名字，避免和同學混淆
-
-5. 啟動 runner：
-   ```bash
-   ./run.sh
-   ```
-   這是前景執行，關掉 SSH 就會停。課堂練習用前景就好，方便你直接看到它接到 job。
-   （正式環境會用 `sudo ./svc.sh install` + `sudo ./svc.sh start` 註冊成系統服務。）
-
-6. 回到 GitHub 的 Runners 清單，確認你的 runner 狀態是 **Idle**，且 label 中有 `gh200`。
-
-### C. 用 workflow 指到它
-
-7. 建立 `.github/workflows/lab07-selfhosted.yml`，從 [`starters/lab07.yml`](starters/lab07.yml) 開始。
-
-8. **補上 `runs-on:`。** 需要同時符合多個 label 時，要寫成清單：
+1. **`runs-on:` 為什麼是清單？** 需要同時符合多個 label 時要寫成清單：
    ```yaml
    runs-on: [ self-hosted, Linux, X64, gh200 ]
    ```
-   意思是「找一台**同時**具備這四個 label 的 runner」。只寫 `self-hosted` 也能跑，但在有多台機器的環境中就無法精準指定——這正是 label 的用途。
+   意思是「找一台**同時**具備這四個 label 的 runner」。只寫 `self-hosted` 也能跑，但在有多台
+   機器的環境中就無法精準指定——這正是 label 的用途。
 
-9. **補上驗證用的 steps：** 印出 `hostname`、`uname -a`、`whoami`、`RUNNER_NAME`、`RUNNER_OS`，讓你確認它真的跑在 VM 上。
+2. **為什麼這條部署路徑不需要 SSH？** 因為 runner 就在目標 VM 上，`build` 與 `deploy` 發生在
+   同一台機器，部署變成單純的本機檔案複製（`sudo install` + `systemctl restart`），
+   不需要對外開放任何 SSH 埠、也不需要 `VM_SSH_PRIVATE_KEY` 這類長期憑證——這是它和
+   workflow 04-06 的 SSH 路徑最大的差異。
 
-10. **感受一下差別：** 再加一個 step 執行 `java -version`。GitHub 託管的 Ubuntu runner 預裝了 JDK，這台 VM 可能沒有。如果失敗了——那正是這個 lab 想讓你體會的重點：**self-hosted 的環境要自己準備。**
+3. **為什麼只用 `workflow_dispatch`、不加 `pull_request`？** 見下方 D 段的安全邊界。
 
-11. **補上 workflow 08 教的「同一台 VM 本機部署」流程：**
-    - `actions/checkout@v5`（`persist-credentials: false`）+ `actions/setup-java@v6`（temurin、21）
-    - **在 workflow 層加上共用的部署鎖：**
-      ```yaml
-      concurrency:
-        group: simpleweb-deploy
-        cancel-in-progress: false
-      ```
-      這把鎖要和 workflow 04、05、06、08 共用，因為它們最後都會碰同一個部署資源：
-      04/06 會把 `simpleweb-test` 的 jar 推到測試 VM，05/06 會進一步推正式環境，
-      而這個 lab 也會把檔案寫進同一台 VM 的 `/opt/simpleweb/test`。
-      **`cancel-in-progress: false`** 的意思不是「互相取消」，而是讓後來的部署排隊等前一個完成，
-      避免兩個 deployment job 同時重啟同一個服務、或在同一個檔案路徑上互相覆蓋。
-    - **Build 時把完整 commit SHA 與 UTC 時間烤進 artifact：**
-      ```bash
-      ./mvnw -B verify -Dapp.build.sha="$GITHUB_SHA" -Dapp.build.time="$(date -u +%FT%TZ)"
-      ```
-    - **本機部署（不需要遠端登入，因為 runner 就在目標 VM 上）：**
-      ```bash
-      sudo install -o simpleweb -g simpleweb -m 0644 target/simpleweb.jar /opt/simpleweb/test/simpleweb.jar
-      sudo systemctl restart simpleweb-test
-      sudo systemctl is-active simpleweb-test
-      ```
-      這條路徑**完全不需要 SSH key**，因為建置與部署發生在同一台機器上——這正是
-      self-hosted runner 在「內網部署」情境下的價值：省掉一段網路連線。
-    - **語義化 exact-SHA smoke test：** 打 `http://localhost:8080/api/info`，解析 JSON 取出
-      `buildSha`，比對是否等於 `$GITHUB_SHA`（不是只看 HTTP 200，而是驗證「真的是這次
-      commit 的版本」——回應更新的舊版本 jar 內容一樣會回 200，但 SHA 會對不上）。
-    - 把 runner 名稱、hostname、service 名稱與這次的 build SHA 寫進 `$GITHUB_STEP_SUMMARY`。
+4. **語義化 smoke test 在驗什麼？** 打 `http://localhost:8080/api/info`，解析 JSON 取出
+   `buildSha`，比對是否等於 `$GITHUB_SHA`——不是只看 HTTP 200，而是驗證「真的是這次 commit
+   的版本」。
 
-12. **手動觸發**（這個 workflow 只有 `workflow_dispatch`），同時觀察 SSH 視窗中 `./run.sh` 的輸出，你會看到它即時接到 job、build、本機部署，並回報 smoke test 結果。
+### C. 觀察講師的私有 `MoneyYu/GH-200` `08` 執行（觀察）
+
+課堂唯一的 live same-VM runner demo 在**私有的 `MoneyYu/GH-200`** 上進行。請跟著講師分享的
+run 頁面與 log **觀察**，並記下：
+
+1. `runs-on` 的 label 如何讓 job 落到那台常駐 self-hosted runner。
+2. log 中的 `hostname` 是那台 VM，**不是** GitHub 託管 runner 的名稱。
+3. `simpleweb-test`（port 8080）在**本機**被重新安裝並重啟，**完全不經過 SSH**。
+4. smoke test 如何用 `/api/info` 的 `buildSha` 佐證部署到的是這次的 commit。
+5. 對照 D 段，逐一指出**五個安全邊界**分別出現在 log 的哪裡（或為什麼看不到——例如「零 inbound
+   SSH」正是因為沒有任何 SSH 連線步驟）。
+
+> 本 repo 的 `08` 是惰性參考範本（`if: ${{ false }}`），觀察時會看到它被**略過（skipped）**——
+> 這是正確、預期的結果，代表本 public repo 與學員 fork 都不會在課程 VM 上跑 self-hosted runner。
 
 ### D. ⚠️ 安全：這一段一定要讀
 
 **Self-hosted runner 最大的風險：任何能讓 workflow 在上面執行的人，等同於可以在你的機器上執行任意程式碼。**
 
-這個 lab 的本機部署路徑必須守住以下**五個安全邊界**：
+這個模式必須守住以下**五個安全邊界**：
 
 1. **同一台 VM 只是課堂簡化。** runner 和部署目標（`simpleweb-test`）共用同一台機器，是為了讓課堂
    demo 簡單；正式環境**應該把 runner 和實際要部署的正式主機分開**，避免 runner 一旦被入侵就等於
    直接拿到正式主機權限。
 2. **這條路徑全程零 inbound SSH。** 建置與部署都發生在 runner 本機，不需要對外開放任何 SSH 埠、
    也不需要 `VM_SSH_PRIVATE_KEY` 這類長期憑證——這是它和 workflow 04-06 的 SSH 路徑最大的差異。
-3. **絕對不要**讓 self-hosted runner 執行來自 fork 的 pull request（見下方第 1 點細節）。
-4. **狀態會殘留**，需要額外的清理紀律（見下方第 2 點細節）。
+3. **絕對不要**讓 self-hosted runner 執行來自 fork 的 pull request（見下方細節）。
+4. **狀態會殘留**，需要額外的清理紀律（見下方細節）。
 5. **GitHub 不會把 job 派給 30 天內沒有更新 runner application 的 runner**——這是治理上的
    一個保護機制，逼你保持 runner 版本更新。
 
 具體來說：
 
-
 1. **絕對不要**讓 public repo 的 self-hosted runner 執行來自 fork 的 pull request。
-   任何陌生人 fork 你的 repo、在 workflow 裡塞一行惡意指令、發一個 PR，那行指令就會在你的內網機器上執行。GitHub 的官方文件對這一點有非常明確的警告。
-   本 lab 的 workflow **只用 `workflow_dispatch`**，就是為了避免這個風險。
+   任何陌生人 fork 你的 repo、在 workflow 裡塞一行惡意指令、發一個 PR，那行指令就會在你的內網
+   機器上執行。GitHub 的官方文件對這一點有非常明確的警告。參考範本**只用 `workflow_dispatch`**，
+   就是為了避免這個風險。
 
-2. **狀態會殘留。** 上一個 job 留下的檔案、環境變數、cache、甚至被竄改的工具，都會影響下一個 job。託管 runner 每次都是新的，self-hosted 不是。正式環境常見的緩解手段是讓每個 job 跑在拋棄式的容器或 VM 中（ephemeral runner）。
+2. **狀態會殘留。** 上一個 job 留下的檔案、環境變數、cache、甚至被竄改的工具，都會影響下一個
+   job。託管 runner 每次都是新的，self-hosted 不是。正式環境常見的緩解手段是讓每個 job 跑在
+   拋棄式的容器或 VM 中（ephemeral runner）。
 
-3. **它在你的內網裡。** 這既是它的價值，也是它的風險——一旦被利用，攻擊者就取得了一個內網立足點。
+3. **它在你的內網裡。** 這既是它的價值，也是它的風險——一旦被利用，攻擊者就取得了一個內網
+   立足點。
 
 4. **權限最小化。** runner 的服務帳號不要用 root，只給它完成工作所需的權限。
 
@@ -176,101 +140,66 @@
 
 規模一大，就不能讓每個人各自亂裝 runner。企業的治理手段包括：
 
-- **Runner groups** — 把 runner 分組，並限制「哪些 repository 或哪些 workflow 可以使用這一組」。例如把能碰 production 的 runner 單獨一組，只開放給特定 repo。
-- **組織／企業層級的 Actions 政策** — 限制可以使用哪些 action（例如只允許 GitHub 官方與已驗證的建立者、或明確列白名單）、是否允許 fork PR 執行、預設的 `GITHUB_TOKEN` 權限等。
-- **Secrets 治理** — 在組織層級集中管理 secrets 並限定可存取的 repo，搭配 environment secrets 做環境隔離。原則不變：**能用 OIDC 就不要存長期憑證**（本課對應的是 workflow 07 的 App Service + OIDC 部署路徑；相對地，04-06 的 SSH 路徑就必須自己保管長期私鑰）。
+- **Runner groups** — 把 runner 分組，並限制「哪些 repository 或哪些 workflow 可以使用這一組」。
+  例如把能碰 production 的 runner 單獨一組，只開放給特定 repo。
+- **組織／企業層級的 Actions 政策** — 限制可以使用哪些 action（例如只允許 GitHub 官方與已驗證
+  的建立者、或明確列白名單）、是否允許 fork PR 執行、預設的 `GITHUB_TOKEN` 權限等。
+- **Secrets 治理** — 在組織層級集中管理 secrets 並限定可存取的 repo，搭配 environment secrets
+  做環境隔離。原則不變：**能用 OIDC 就不要存長期憑證**（本課對應的是 workflow 07 的
+  App Service + OIDC 部署路徑；相對地，04-06 的 SSH 路徑就必須自己保管長期私鑰）。
 
-### F. 收尾：把（你自己私有 repo 複本上的臨時）runner 移除
+### F. 選修：課後的隔離實驗（不在課程資源上進行）
 
-**做完一定要移除你在自己私有 repo 複本（private copy，非 public fork）上註冊的那個臨時 runner**，否則這台機器會一直掛在你的 repo
-上。（這裡收尾的是**學員自己的臨時 runner**；講師在私有 `MoneyYu/GH-200` 上的常駐 runner 是課程
-基礎設施，不在本步驟移除範圍內。）
+如果你想在課後親手體驗一次 self-hosted runner 的註冊與執行，**這不是課堂活動**，而且必須完全
+與課程資源隔離：
 
-> 與註冊一樣，移除也由**講師從 Azure Cloud Shell**（或其他受信任管理連線）在 VM 上執行；
-> 學員在 GitHub UI 觀察 runner 從清單消失即可，**不需要、也不應該**自行 SSH 進 VM。
+- 需**先取得講師同意**，並使用**另一台你自己、經講師同意的隔離機器**（不是課程 VM）。
+- 建立**另一個你自己擁有的獨立 private repository**（不是課程 repo、也不是其 fork）。
+- 一切註冊、執行、清理都在那台隔離機器與那個獨立 repo 上進行，**與本課程 VM、班級 repo 完全
+  無關**。
+- 詳細步驟請直接參考 GitHub 官方文件（見文末連結），本講義**刻意不提供**任何針對課程 VM 或
+  課程 repo 的註冊指令。
 
-13. 在 SSH 視窗按 `Ctrl+C` 停掉 `./run.sh`。
+## 你要自己完成的設計（不需要實跑）
 
-14. 回到 GitHub Runners 頁面取得移除用的 token，然後在 VM 上執行：
-    ```bash
-    ./config.sh remove --token <畫面上給你的移除 token>
-    ```
-    （若你先前有安裝成服務，要先 `sudo ./svc.sh stop` 再 `sudo ./svc.sh uninstall`。）
+以 [`starters/lab07.yml`](starters/lab07.yml) 為藍本，在你的設計筆記中補齊：
 
-15. 確認 GitHub 的 Runners 清單中已經看不到你的 runner。
+- `runs-on:` 應該寫成哪一個多 label 清單，為什麼？
+- 五個安全邊界分別對應到 YAML 或部署流程的哪一部分？
+- 如果要把這個模式搬到正式環境，你會怎麼把 runner 與正式主機分開、怎麼設 runner group？
 
-16. 刪除你自己建立的那個目錄：
-    ```bash
-    cd ~ && rm -rf ~/actions-runner-<你的名字>
-    ```
-    > ⚠️ 只刪你自己建立的那一個目錄。**不要**對 `/opt/simpleweb` 或其他人的目錄做任何刪除。
+> 這是**設計與觀察**練習，**不需要**、也**不應該**把它註冊到任何 runner 或在課程資源上執行。
+> 對照答案：[`solutions/lab07.yml`](solutions/lab07.yml)（唯讀參考）。
 
-## 你要自己完成的 YAML
+## 驗收標準（觀察 / 設計）
 
-Starter：[`starters/lab07.yml`](starters/lab07.yml)
-
-```yaml
-name: Lab07 Self-hosted Runner
-
-# 只用 workflow_dispatch —— 不要加 pull_request！
-on:
-  workflow_dispatch:
-
-permissions:
-  contents: read
-
-concurrency:
-  group: simpleweb-deploy
-  cancel-in-progress: false
-
-jobs:
-  on-self-hosted:
-    # TODO 1: runs-on 指向 self-hosted + Linux + X64 + gh200
-    runs-on: TODO-RUNNER-LABELS
-    steps:
-      # TODO 2: 印出 hostname / uname -a / whoami / RUNNER_NAME / RUNNER_OS
-      # TODO 3: java -version（失敗也沒關係，重點是體會差異）
-      # TODO 4: actions/checkout@v5（persist-credentials: false）+ actions/setup-java@v6（temurin / '21'）
-      # TODO 5: Build 時把完整 commit SHA 與 UTC 時間烤進 artifact：
-      #   ./mvnw -B verify -Dapp.build.sha="$GITHUB_SHA" -Dapp.build.time="$(date -u +%FT%TZ)"
-      # TODO 6: 本機部署（不需要 SSH，runner 就在目標 VM 上）：
-      #   sudo install ... target/simpleweb.jar /opt/simpleweb/test/simpleweb.jar
-      #   sudo systemctl restart simpleweb-test，再確認 is-active
-      # TODO 7: 語義化 smoke test：curl http://localhost:8080/api/info，驗到 buildSha == $GITHUB_SHA
-      # TODO 8: 把環境資訊「與」五個安全邊界寫進 $GITHUB_STEP_SUMMARY
-```
-
-## 驗收標準
-
-- [ ] GitHub 的 Runners 清單中出現你的 runner，狀態 **Idle**，含 label `gh200`
-- [ ] 手動觸發後，job 成功執行且顯示**綠色勾勾**
-- [ ] log 中的 `hostname` 是那台 VM，**不是** GitHub 託管 runner 的名稱
-- [ ] 你在 SSH 視窗中親眼看到 runner 接到 job
-- [ ] `simpleweb-test`（port 8080）在本機被重新安裝並重啟，**不經過 SSH**
-- [ ] smoke test 驗到 `/api/info` 的 `buildSha` 等於這次觸發的完整 commit SHA
-- [ ] Job Summary 顯示 runner 名稱、hostname，以及五個安全邊界的說明
-- [ ] 你能說出「為什麼這個 workflow 不能加上 `pull_request` 觸發」
+- [ ] 你能說出 GitHub 託管 runner 與 self-hosted runner 的責任與環境差異
+- [ ] 你能讀懂 `runs-on: [ self-hosted, Linux, X64, gh200 ]` 這種多 label 清單的意義
+- [ ] 你能說明這條同機部署路徑**為什麼全程零 inbound SSH**
+- [ ] 你**觀察**了講師在私有 `MoneyYu/GH-200` 上的 `08` 執行與 log，並能對照到 log 的內容
+- [ ] 你能解釋為什麼本 repo 的 `08` 會被**略過（`if: ${{ false }}`）**，以及為什麼學員 fork
+      不應在課程 VM 上註冊 runner
 - [ ] 你能完整說出五個安全邊界：同一台 VM 只是課堂簡化、零 inbound SSH、正式環境要分離
       runner 與正式主機、絕不服務不受信任的 fork PR、30 天未更新的 runner 拿不到 job
-- [ ] **收尾完成**：runner 已從 GitHub 移除，VM 上你建立的目錄已刪除
-- [ ] `simpleweb-test` 與 `simpleweb-prod` 兩個服務仍然正常（`:8080`、`:8081` 都還通）
+- [ ] 你能說出「為什麼這個 workflow 不能加上 `pull_request` 觸發」
+- [ ] 你能說明 runner group 與組織政策各自控制什麼
 
-## 常見錯誤
+## 常見誤解
 
-| 症狀 | 原因 | 修法 |
-|---|---|---|
-| job 一直卡在 queued | 沒有 runner 符合 `runs-on` 的**全部** label | 檢查拼字與大小寫（`X64` 不是 `x64`）；確認 runner 是 Idle |
-| `runs-on: self-hosted, Linux` 直接語法錯 | 多個 label 要寫成清單 | 用 `[ a, b, c ]` 或多行 `- ` 清單 |
-| 註冊時 token 無效 | 註冊 token 有時效 | 回 GitHub 頁面重新產生 |
-| `./config.sh` 說已經設定過 | 同一目錄重複設定 | 先 `./config.sh remove`，或換一個乾淨目錄 |
-| 關掉 SSH 後 runner 就離線 | `./run.sh` 是前景程序 | 課堂上正常；正式環境請裝成服務 |
-| `java: command not found` | self-hosted 沒有預裝工具 | 這是預期的；正式用途要自己裝，或在 workflow 中用 `setup-java` |
-| 同學之間互相搶到 job | 大家用同一個 label | label 加上自己的名字做區隔 |
-| 做完忘了移除 runner | — | 一定要完成收尾步驟 |
-| `sudo install` 說 permission denied | runner 服務帳號沒有對 `/opt/simpleweb/test` 的 sudo 權限 | 這是 VM 上既有的權限設定，確認你用的是講師配置好的帳號，不要自己改權限 |
-| smoke test 打 `:8080` 一直連不上 | `simpleweb-test` 沒有成功重啟，或 build 失敗 | 檢查 `Build and test` step 的輸出，以及 `systemctl is-active simpleweb-test` |
-| smoke test 顯示的 `buildSha` 是舊版本 | 部署 step 沒有真的覆蓋到 `/opt/simpleweb/test/simpleweb.jar` | 確認目標路徑打對，而且是 `test` 不是 `prod` |
+| 症狀 / 疑問 | 說明 |
+|---|---|
+| 「為什麼我把 `08` 複製到 fork 也不會跑？」 | 它的 job 是 `if: ${{ false }}`，惰性參考範本，設計上永遠跳過；不要為了讓它跑而註冊 runner 到課程 VM |
+| `runs-on: self-hosted, Linux` 直接語法錯 | 多個 label 要寫成清單：`[ a, b, c ]` 或多行 `- ` 清單 |
+| 以為 self-hosted runner 每次都是乾淨環境 | 不是；狀態會殘留，正式環境常用 ephemeral runner 緩解 |
+| 以為自管 runner「免費」 | 不計 Actions minutes，但 VM、修補、安全與清理成本都在你身上 |
+| 想在自己 fork 上實跑一次 | 只能在課後、經講師同意的**隔離機器 + 獨立 private repo** 上做，絕不用課程資源 |
 
-## 解答
+## 參考
 
-[`solutions/lab07.yml`](solutions/lab07.yml)
+- 課堂唯一 live demo：講師在私有 `MoneyYu/GH-200` 上的 `08.selfhosted-runner`（常駐 runner）
+- 唯讀參考 YAML：[`starters/lab07.yml`](starters/lab07.yml) ·
+  [`solutions/lab07.yml`](solutions/lab07.yml) ·
+  [`08.selfhosted-runner.yml`](../.github/workflows/08.selfhosted-runner.yml)
+- GitHub 官方文件（課後隔離實驗自行參考）：
+  [Self-hosted runners](https://docs.github.com/en/actions/concepts/runners/self-hosted-runners) ·
+  [Runner groups](https://docs.github.com/en/actions/concepts/runners/runner-groups)
