@@ -10,7 +10,11 @@
 # ⚠️ 安全紅線
 #   絕對不要讓不信任的 fork PR 跑到 self-hosted runner 上。
 #   外部 PR 送進來的 workflow 會直接在你的機器上執行任意程式碼。
-#   本課的示範 repo 僅供課堂使用，示範結束後請把 runner 移除。
+#   這個 public upstream（MoneyDemo/20260903-GH200）刻意「未註冊任何 self-hosted runner」，
+#   registered runner 數維持為零；下方 job 以 repository visibility 作 fail-closed 條件，
+#   在 public upstream 一律略過（skip），只有各自「私有」的學員 repo 複本（private copy，非 public fork）才會用自己隔離的 runner 執行。
+#   實際的 M4 self-hosted runner demo 由講師在私有的 MoneyYu/GH-200 上，用其常駐的
+#   self-hosted runner 進行（那台 runner 是常駐課程基礎設施，示範後不移除）。
 #   GitHub 不會把 job 派給 30 天內沒有更新 runner application 的 runner。
 #
 # 這支預設不會自動跑；要先在 VM 上註冊好 runner 並貼上 gh200 這個 label。
@@ -28,6 +32,9 @@ concurrency:
 
 jobs:
   build-on-selfhosted:
+    # Fail-closed：public upstream 沒有註冊 runner，故以 repository visibility 作條件——
+    # 只有「私有」的學員 repo 複本（private copy，非 public fork；visibility == 'private'）才會執行；public upstream 一律 skip。
+    if: github.event.repository.visibility == 'private'
     # 這裡不是 ubuntu-latest，而是你自己註冊的 runner 的 labels
     runs-on: [self-hosted, linux, gh200]
 

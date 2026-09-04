@@ -7,6 +7,16 @@
 > 專注在 `runs-on:` 標籤與 self-hosted runner 的安全邊界。
 > **絕對不要為了連線而把 VM 的 22 埠對整個 Internet 開放。**
 
+> 🔒 **Runner 常駐邊界（安全）：** public class repo `MoneyDemo/20260903-GH200` 本身**不註冊任何
+> self-hosted runner**，其 `08.selfhosted-runner` 以
+> `github.event.repository.visibility == 'private'` **fail-closed**，在 public upstream 一律略過
+> （skip）；只有各自「**私有**」的課程 repo 複本（private copy——以 clone／import 建立的私有
+> repo，**不是** public repo 的 network fork，因為那種 fork 仍是 public、會被同一條件正確略過）
+> 才會用自己隔離的 runner 執行。課堂上實際的 M4 demo 由講師在**私有的 `MoneyYu/GH-200`** 上、用
+> 其**常駐**的 self-hosted runner（常駐課程基礎設施，示範後**不移除**、runner 數不歸零）進行。本
+> lab 下面的「註冊 → 練習 → 移除」流程，指的是**你在自己私有複本上建立的臨時 runner** 的收尾
+> 清理，與講師那台常駐 runner 是兩回事。
+
 ## 學習目標
 
 做完這個 lab，你應該可以：
@@ -20,7 +30,8 @@
 - **完整說出 self-hosted runner 的五個安全邊界**：同一台 VM 上 runner 與部署目標共用只是課堂簡化、
   這條路徑全程零 inbound SSH、正式環境應把 runner 與部署目標分開、絕不能服務不受信任的
   fork PR、以及 GitHub 不會把 job 派給 30 天內沒有更新 runner application 的 runner
-- 用完之後把 runner 乾淨地移除
+- 用完之後把**你自己私有 repo 複本（private copy，非 public fork）上建立的臨時 runner** 乾淨地移除（講師在私有 `MoneyYu/GH-200`
+  上的常駐 runner 不在此列，屬常駐課程基礎設施、示範後不移除）
 
 ## 對應模組
 
@@ -169,9 +180,11 @@
 - **組織／企業層級的 Actions 政策** — 限制可以使用哪些 action（例如只允許 GitHub 官方與已驗證的建立者、或明確列白名單）、是否允許 fork PR 執行、預設的 `GITHUB_TOKEN` 權限等。
 - **Secrets 治理** — 在組織層級集中管理 secrets 並限定可存取的 repo，搭配 environment secrets 做環境隔離。原則不變：**能用 OIDC 就不要存長期憑證**（本課對應的是 workflow 07 的 App Service + OIDC 部署路徑；相對地，04-06 的 SSH 路徑就必須自己保管長期私鑰）。
 
-### F. 收尾：把 runner 移除
+### F. 收尾：把（你自己私有 repo 複本上的臨時）runner 移除
 
-**做完一定要移除**，否則這台機器會一直掛在別人的 repo 上。
+**做完一定要移除你在自己私有 repo 複本（private copy，非 public fork）上註冊的那個臨時 runner**，否則這台機器會一直掛在你的 repo
+上。（這裡收尾的是**學員自己的臨時 runner**；講師在私有 `MoneyYu/GH-200` 上的常駐 runner 是課程
+基礎設施，不在本步驟移除範圍內。）
 
 > 與註冊一樣，移除也由**講師從 Azure Cloud Shell**（或其他受信任管理連線）在 VM 上執行；
 > 學員在 GitHub UI 觀察 runner 從清單消失即可，**不需要、也不應該**自行 SSH 進 VM。
