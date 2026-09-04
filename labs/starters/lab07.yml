@@ -1,12 +1,17 @@
 # ---------------------------------------------------------------------------
-# Lab 07 starter（選修 / 進階）— self-hosted runner
+# Lab 07 starter（選修 / 觀察與設計）— self-hosted runner【唯讀參考範本】
 #
-# 目的地：.github/workflows/lab07-selfhosted.yml
+# ⚠️ 這是「唯讀參考／設計骨架」，用來閱讀與在設計筆記中補齊，**不是拿來實跑的**。
+#    - 不要把它註冊到任何 runner，也不要指向共用的課程 VM。
+#    - 課堂唯一的 live same-VM runner demo 由講師在私有 MoneyYu/GH-200 的常駐 runner 上進行；
+#      本 public class repo 的 08.selfhosted-runner 是惰性參考範本（if: ${{ false }}，永遠跳過）。
+#    - 若要課後親手實驗，只能在經講師同意的「另一台隔離機器 + 另一個獨立 private repo」上做，
+#      絕不使用課程 VM 或課程 repo／其 fork（見 lab07-selfhosted-runner.md 的 F 段）。
 #
 # ⚠️ 安全提醒：self-hosted runner 絕對不可以用來執行不受信任的 fork PR。
 #    這個 workflow 只使用 workflow_dispatch，不要加上 pull_request 觸發。
 #
-# 這個 lab 教/實作 workflow 08 同一台 VM 本機部署的模式：
+# 這份範本示範 workflow 08 同一台 VM 本機部署的模式（供閱讀／設計對照）：
 #   build（把完整 commit SHA 烤進 artifact）→ 本機安裝並重啟 simpleweb-test（不需要 SSH）
 #   → 本機語義化 exact-SHA smoke test
 # ---------------------------------------------------------------------------
@@ -25,9 +30,12 @@ concurrency:
 
 jobs:
   on-self-hosted:
-    # TODO 1: 指定要跑在你在 VM 上註冊的 self-hosted runner。
+    # 惰性參考範本：以字面 if: ${{ false }} 永遠跳過。這份 YAML 只供閱讀與設計，
+    # 學員不在任何 repo／fork 上實跑，也不註冊 runner、不連課程 VM。
+    if: ${{ false }}
+    # TODO 1（設計）：在設計上，runs-on 會指向一台 self-hosted runner 的多標籤清單。
     #   需要同時符合多個標籤時，runs-on 要寫成「清單」。
-    #   建議標籤：self-hosted, Linux, X64, gh200
+    #   範例設計標籤：self-hosted, Linux, X64, gh200（本課不實際註冊任何 runner）
     #   runs-on: [ ???, ??? ]
     runs-on: TODO-RUNNER-LABELS
 

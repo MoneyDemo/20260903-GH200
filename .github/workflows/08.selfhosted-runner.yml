@@ -1,19 +1,27 @@
-# 08 - Self-hosted runner（Module 4）
+# 08 - Self-hosted runner（Module 4）— 惰性參考範本（inert reference only）
 #
-# 教學重點
+# ⚠️ 這支 workflow 是「唯讀參考範本」，在本 public class repo（MoneyDemo/20260903-GH200）
+#    與任何學員 fork／複本上都「絕不執行」：下方 job 以字面 `if: ${{ false }}` 永遠跳過。
+#    它只用來閱讀與設計討論，示範 self-hosted runner 的 YAML 長相與安全邊界；
+#    不要為了讓它「跑起來」而在本 repo 或你的 fork／私有複本上註冊任何 self-hosted runner，
+#    也不要把它指向共用的課程 VM。共用課程 VM 只由講師管理，任何學員 public/private fork
+#    都不得使用它。
+#
+# 教學重點（用來閱讀、對照，不在課程資源上實跑）
 #   - runs-on 用 label 指定要跑在哪一台 runner 上
-#   - 這個教學 demo 把 runner 和部署目標放在同一台 VM，所以「部署」變成單純的本機檔案複製
+#   - 這個範本把 runner 和部署目標放在同一台 VM，所以「部署」變成單純的本機檔案複製
 #   - 這條路徑不需要 inbound SSH，也不需要把 SSH key 或 Azure credential 放進 workflow
 #   - Runner group 可以控制「哪些 repository 能用哪些 runner」
 #   - 真實 production 通常應該分開 runner 和 application target，避免 runner 權限等同於正式主機權限
 #
-# ⚠️ 安全紅線
-#   絕對不要讓不信任的 fork PR 跑到 self-hosted runner 上。
-#   外部 PR 送進來的 workflow 會直接在你的機器上執行任意程式碼。
-#   本課的示範 repo 僅供課堂使用，示範結束後請把 runner 移除。
-#   GitHub 不會把 job 派給 30 天內沒有更新 runner application 的 runner。
+# ✅ 唯一的 live same-VM runner demo：由講師在私有的 MoneyYu/GH-200 上、用其「常駐」的
+#    self-hosted runner 進行（那台 runner 是常駐課程基礎設施，示範後不移除、runner 數不歸零）。
+#    學員只觀察講師那次執行的 run/log，不在自己的 repo 或課程 VM 上重現。
 #
-# 這支預設不會自動跑；要先在 VM 上註冊好 runner 並貼上 gh200 這個 label。
+# ⚠️ 安全紅線
+#   絕對不要讓不信任的 fork PR 跑到 self-hosted runner 上——外部 PR 會直接在你的機器上
+#   執行任意程式碼。本範本刻意只用 `workflow_dispatch`，且 job 以 `if: ${{ false }}` 永遠不執行。
+#   GitHub 也不會把 job 派給 30 天內沒有更新 runner application 的 runner。
 name: 08.selfhosted-runner
 
 on:
@@ -28,6 +36,10 @@ concurrency:
 
 jobs:
   build-on-selfhosted:
+    # 惰性參考範本：以字面 `if: ${{ false }}` 永遠跳過，確保本 public class repo 與任何
+    # 學員 fork／私有複本都不會在課程 VM 上執行 self-hosted runner。唯一的 live demo 由講師
+    # 在私有 MoneyYu/GH-200 的常駐 runner 上進行；下方步驟僅供閱讀與設計對照。
+    if: ${{ false }}
     # 這裡不是 ubuntu-latest，而是你自己註冊的 runner 的 labels
     runs-on: [self-hosted, linux, gh200]
 

@@ -1,4 +1,12 @@
-# Lab 05 — Promote 到 production（核准關卡）
+# Lab 05 — Promote 到 production（核准關卡）｜設計 + 觀察
+
+## 這個 lab 的定位：設計 + 觀察（學員不實跑、不核准）
+
+> **Lab 05 是「設計 + 審查」練習。** production 部署會用到 VM 的長期 SSH 私鑰，只由講師保管；
+> **學員不會拿到課程 VM 的憑證，也不擔任 production 的 required reviewer**。你要做的是**寫出
+> promote（build once, deploy many）的 YAML、讓講師 review**，並**觀察講師在 class repo
+> （`MoneyDemo/20260903-GH200`）示範的 `05` run 如何停在 `production` 等待核准、由授權者核准後
+> 才部署**。真正的 production 部署與核准由講師示範。
 
 ## 學習目標
 
@@ -8,7 +16,7 @@
   workflow 04 已經跑成功的那個 run，下載它的 artifact，**完全不重新 build**
 - 說明兩層人工確認的差異：`workflow_dispatch` 的 `confirm` + 40 字元 `build_sha` 明確輸入，
   與 GitHub Environment 的保護規則（protection rules）／required reviewer 各擋住什麼
-- 親眼看到 workflow **停在 waiting 狀態等待核准**，並完成核准動作
+- 親眼看到 workflow **停在 waiting 狀態等待核准**，並觀察講師（授權 reviewer）完成核准動作
 - 分辨 repository 層級與 environment 層級的 secrets／variables
 - 說明「promote」的意義：**部署同一份已驗證的產出，而不是重新建置**
 - 驗證 production 服務（port 8081）確實更新為指定的 build SHA
@@ -19,20 +27,15 @@
 
 ## 前置需求
 
-> **預設由講師實跑。** production 部署會用到 VM 的長期 SSH 私鑰。你仍要自己完成 YAML，
-> 並觀察講師示範 run 在 `production` Environment 等待核准的過程。
+- 已完成 [Lab 04](lab04-deploy-test.md) 的 YAML 設計
+- 能開啟講師分享的 class repo `05`（production promote）run 頁面與 log 來觀察，
+  包括它停在 `production` 等待核准、核准後才部署的過程
+- 你在自己的 fork 只撰寫／檢視 YAML；其中引用的 `${{ vars.VM_PUBLIC_IP }}` 等變數、
+  `${{ secrets.VM_SSH_PRIVATE_KEY }}` 與 `production` 的 required reviewer，都由講師在 class repo
+  端配置，**學員不需要、也不會拿到實際憑證或擔任 reviewer**
+- 觀察時可留意講師用來 promote 的**完整 40 字元 commit SHA**如何對應到 Lab04 的成功 run
 
-- 已完成 [Lab 04](lab04-deploy-test.md)，test 環境可以成功部署，且該次 push 對應的
-  你自己的 **`lab04-deploy-test.yml`** run 是**成功**狀態（Lab05 要靠 `actions:read` 找到它，不會重新 build）
-- 你的 repo 已建立 GitHub Environment：**`production`**，且已設定 **required reviewer**
-  - `scripts/setup-student-repo.*` 會建立 environment，但**審核者需要你自己或講師指定**
-  - 課堂做法：把你自己設為 reviewer，這樣你可以自己按核准，體驗完整流程
-- Variables（`VM_PUBLIC_IP` / `VM_SSH_USER` / `VM_SSH_HOST_KEY`）與 **Environment secret**
-  （`VM_SSH_PRIVATE_KEY`，設在 `test` 與 `production` 兩個 Environment，不是 repository secret）同 Lab 04
-- 手邊要有 Lab 04 那次 push 的**完整 40 字元 commit SHA**（`git log --format=%H -1`，
-  或到該次 workflow 04 run 頁面複製）——待會觸發 Lab05 時要貼上
-
-> ⚠️ VM 的 public IP 一律以 `<VM_PUBLIC_IP>` / `${{ vars.VM_PUBLIC_IP }}` 表示，講師會在課堂上給實際值。
+> ⚠️ 講義中 VM 的 public IP 一律以 `<VM_PUBLIC_IP>` / `${{ vars.VM_PUBLIC_IP }}` 表示（設計佔位）。
 
 ## 步驟
 
@@ -41,11 +44,11 @@
    以及真正部署的 `deploy-prod`。這就是實際課堂使用的 workflow 05 的教學模式：
    **build once, promote**，而不是每個環境各自重來一次。
 
-2. **確認 environment 保護規則。** 到 repo 的設定頁找到 Environments，點開 `production`：
-   - 勾選 required reviewers，加入至少一個人（課堂上就是你自己）
-   - 觀察這裡還有哪些選項可以設定：等待時間、可部署的分支限制、以及**只屬於這個 environment 的 secrets／variables**
+2. **理解 environment 保護規則（觀察 class repo 設定）。** production 的保護規則設定在 environment 上、不寫在 YAML 裡：
+   - required reviewers（class repo 由講師／授權者擔任，**學員不擔任**）
+   - 還有哪些選項：等待時間、可部署的分支限制、以及**只屬於這個 environment 的 secrets／variables**
 
-   關鍵觀念：**保護規則是設定在 environment 上，不是寫在 YAML 裡。** YAML 裡只寫 `environment: production` 這一行，剩下的由 repo 設定決定。這樣的分工讓「誰可以放行上線」不會被改 YAML 的人繞過。
+   關鍵觀念：**保護規則是設定在 environment 上，不是寫在 YAML 裡。** YAML 裡只寫 `environment: production` 這一行，剩下的由 repo 設定決定。這樣的分工讓「誰可以放行上線」不會被改 YAML 的人繞過。學員在自己的 YAML 只需寫出 `environment: production`；實際的 reviewer 由講師在 class repo 配置。
 
 3. **加入 `guard` job，驗證兩個手動輸入。** `workflow_dispatch` 要定義兩個 `inputs`：
    - `confirm`：必須手動輸入 `deploy` 這個字，才代表「我真的要部署正式環境」
@@ -88,21 +91,22 @@
    `inputs.build_sha`**，不是 `github.sha`（因為這支 workflow 本身可能跑在任何 commit 上觸發，
    真正要驗的是「promote 的是不是你指定的那個 SHA」）。
 
-7. **手動觸發，帶上 `confirm` 與 `build_sha`，然後觀察核准流程。** 這是本 lab 的重點，請放慢看：
+7. **觀察講師手動觸發，帶上 `confirm` 與 `build_sha`，並看核准流程。** 這是本 lab 的重點，請放慢看：
    - `guard` 綠了（代表兩個輸入都通過驗證）
    - `deploy-prod` **不會**開始跑，它會停在等待狀態，run 頁面上出現需要審核的提示
-   - 同時，被指定為 reviewer 的人會收到通知
+   - 同時，被指定為 reviewer 的人（class repo 由授權者擔任）會收到通知
    - 注意：這段等待時間**不會**消耗 runner，因為根本還沒有 runner 被指派
 
-8. **執行核准。** 在 run 頁面上點擊審核的按鈕，可以選擇核准或拒絕，並留下一段註解。核准後 `deploy-prod` 才會開始執行，先去找 workflow 04 的成功 run、下載 artifact，再部署。
-   - 順便試一次「拒絕」：拒絕後 job 會顯示為失敗／已取消，整條流程停在這裡。做完再重跑一次並核准。
+8. **觀察講師執行核准。** 授權的 reviewer 在 run 頁面上點擊審核按鈕，可以選擇核准或拒絕並留言。核准後 `deploy-prod` 才會開始執行，先去找 workflow 04 的成功 run、下載 artifact，再部署。
+   - 講師也可示範一次「拒絕」：拒絕後 job 會顯示為失敗／已取消，整條流程停在這裡；之後重跑並核准。
+   - **學員不擔任 reviewer、不自行核准**，重點在理解兩層確認的分工。
 
-9. **驗證 production。**
+9. **觀察 production 驗證。** 由講師示範：
    - `curl http://<VM_PUBLIC_IP>:8081/actuator/health` → 200
    - 瀏覽器開 `http://<VM_PUBLIC_IP>:8081/`，environment 應顯示 **production**
    - 同時開 `:8080`（test）比較，兩者是**同一台 VM 上的兩個服務**，port 與 environment 都不同
 
-10. **確認稽核軌跡。** 回到 Environments 設定頁，`production` 會列出部署歷史；每一筆都能追到是誰核准、部署了哪個 commit。這就是企業要 environment 的主要理由：**可追溯**。
+10. **確認稽核軌跡（觀察）。** 在 class repo 的 Environments 設定頁，`production` 會列出部署歷史；每一筆都能追到是誰核准、部署了哪個 commit。這就是企業要 environment 的主要理由：**可追溯**。
 
 ## 概念補充：environment-scoped secrets
 
@@ -156,16 +160,14 @@ jobs:
       # TODO: smoke test :8081/api/info，驗 buildSha == inputs.build_sha（不是 github.sha）
 ```
 
-## 驗收標準
+## 驗收標準（設計 + 觀察）
 
-- [ ] `deploy-prod` job 在核准前**確實停住**，run 頁面顯示等待審核
-- [ ] 你完成了一次核准，`deploy-prod` 才開始執行
-- [ ] `guard` 與 `deploy-prod` 最終全部**綠色勾勾**
-- [ ] `curl http://<VM_PUBLIC_IP>:8081/actuator/health` **回傳 200**
-- [ ] 瀏覽器開 `:8081`，environment 顯示 **production**；開 `:8080`，顯示 **test**
-- [ ] production 顯示的 build SHA 等於你輸入的 `build_sha`
-- [ ] `deploy-prod` 部署的是用 `actions:read` 從 workflow 04 成功 run 下載的同一份 jar（**沒有重新 build，也沒有重新部署 test**）
-- [ ] `production` environment 的部署歷史中有這一筆紀錄，含核准者
+- [ ] 你完成了 `lab05-deploy-prod.yml` 的 YAML，且通過講師 review
+- [ ] 你的 workflow 只有 `guard` 與 `deploy-prod` 兩個 job，**不 build、不重跑 test 部署**
+- [ ] `guard` 驗證 `inputs.confirm == "deploy"` 且 `inputs.build_sha` 符合 `^[0-9a-f]{40}$`
+- [ ] `deploy-prod` 只宣告 `permissions: { actions: read }`，用 `actions:read` 找 workflow 04 成功 run 並下載同一份 `simpleweb-jar`（沒有重新 build）
+- [ ] `deploy-prod` 部署到 `/opt/simpleweb/prod`、重啟 `simpleweb-prod`，smoke test 打 `:8081` 並比對 `inputs.build_sha`（不是 `github.sha`）
+- [ ] 你**觀察**了講師 class repo 的 `05` run：`deploy-prod` 在核准前確實停住、核准後才執行、`:8081` 顯示 environment = production 且部署歷史含核准者
 - [ ] 你能說出：為什麼保護規則設在 environment 而不是寫在 YAML 裡
 - [ ] 你能說出：為什麼 `deploy-prod` 只給 `actions:read`，不給 `contents:write` 或其他寫入權限
 - [ ] 你能說出：為什麼 `confirm` + `build_sha` 這兩層輸入驗證，和 environment 的 required reviewer 互不取代
@@ -178,7 +180,7 @@ jobs:
 | 症狀 | 原因 | 修法 |
 |---|---|---|
 | `deploy-prod` 直接就跑了，沒有停下來 | environment 名稱拼錯，或該 environment 沒設 required reviewer | 確認是 `production`（不是 `prod`）且已加審核者 |
-| 核准按鈕沒出現／按不下去 | 你不在 reviewer 名單裡 | 把自己加進 required reviewers |
+| 核准按鈕沒出現／按不下去 | reviewer 由講師在 class repo 指定 | 學員**不自行**加入 reviewer 或核准；此情況只在 class repo 由授權 reviewer（講師）處理，學員觀察即可 |
 | `guard` 就直接失敗 | `confirm` 沒輸入 `deploy`，或 `build_sha` 不是 40 字元小寫十六進位 | 觸發時把兩個欄位都填對；短版 SHA（7 碼）不合格 |
 | 找不到成功的 workflow 04 run | 輸入的 `build_sha` 對應的 push 還沒跑過 workflow 04，或那次 run 失敗了 | 先確認 Lab04 那次 push 的 workflow 04 是綠燈，再拿它的完整 SHA 來 promote |
 | `gh run download` 失敗說沒有 artifact | workflow 04 run 沒有成功上傳 `simpleweb-jar`（例如 build 失敗在上傳之前） | 換一個真的有上傳成功的 run；不要自己另外 build 一份頂替 |

@@ -1,8 +1,14 @@
 name: Lab07 Self-hosted Runner
 
+# 【唯讀參考範本 / 觀察與設計用，非拿來實跑】
+#   - 不要把它註冊到任何 runner，也不要指向共用的課程 VM。
+#   - 課堂唯一的 live same-VM runner demo 由講師在私有 MoneyYu/GH-200 的常駐 runner 上進行；
+#     本 public class repo 的 08.selfhosted-runner 是惰性參考範本（if: ${{ false }}，永遠跳過）。
+#   - 課後若要親手實驗，只能在經講師同意的「另一台隔離機器 + 另一個獨立 private repo」上做。
+#
 # 只用手動觸發：self-hosted runner 不可以暴露給不受信任的 fork PR。
 #
-# 教/實作 workflow 08 同一台 VM 本機部署的模式：
+# 示範 workflow 08 同一台 VM 本機部署的模式（供閱讀／設計對照）：
 #   build（把完整 commit SHA 烤進 artifact）→ 本機安裝並重啟 simpleweb-test（不需要 SSH）
 #   → 本機語義化 exact-SHA smoke test
 on:
@@ -17,6 +23,9 @@ concurrency:
 
 jobs:
   on-self-hosted:
+    # 惰性參考範本：以字面 if: ${{ false }} 永遠跳過。這份解答只供閱讀與設計對照，
+    # 學員不在任何 repo／fork 上實跑，也不註冊 runner、不連課程 VM。
+    if: ${{ false }}
     runs-on: [ self-hosted, Linux, X64, gh200 ]
     steps:
       - name: Who am I

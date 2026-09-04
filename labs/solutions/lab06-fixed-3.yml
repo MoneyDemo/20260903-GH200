@@ -4,6 +4,14 @@
 #   runner 才會被注入 ACTIONS_ID_TOKEN_REQUEST_URL / ACTIONS_ID_TOKEN_REQUEST_TOKEN。
 #   注意：在 job 層級寫 permissions 會「整組覆蓋」workflow 層級的設定，
 #   所以需要的權限要一次列齊（這裡同時保留 contents: read）。
+#
+# ⚠️ 預期結果（重要，兩階段）：
+#   補上 `id-token: write` 之後，第一階段（向 GitHub 索取 OIDC id token）會成功，
+#   azure/login 於是「往前推進到真正連 Azure 認證那一步」。但因為 client/tenant/subscription
+#   都是「全為零的佔位 UUID」，並不對應任何真實 Azure 應用程式，所以會在「Azure 認證階段」
+#   失敗——這是本題「已修正」的正確、預期結果，用來證明權限問題已解決、瓶頸已從
+#   「拿不到 id token」前移到「佔位身分無法登入 Azure」。真正能成功登入 Azure 的示範
+#   只在講師的 workflow 07（App Service + OIDC，使用講師設定好的真實 federated identity）進行。
 
 name: Lab06 Broken 3
 
@@ -25,9 +33,10 @@ jobs:
         # 原 release tag: azure/login@v3（特權 OIDC 登入，釘選成不可變 SHA）
         uses: azure/login@7ddb5af1ef8758cf1353cf3b42f940aee27ba21c
         with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          # 全為零的佔位 UUID（非 secret、非真實身分）：修好權限後會走到 Azure 認證階段並於該處失敗
+          client-id: '00000000-0000-0000-0000-000000000000'
+          tenant-id: '00000000-0000-0000-0000-000000000000'
+          subscription-id: '00000000-0000-0000-0000-000000000000'
 
       - name: Show current Azure account
         run: az account show --output table

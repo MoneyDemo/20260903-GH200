@@ -20,8 +20,9 @@
 
 ## 前置需求
 
-- 已完成 Lab 01 ~ Lab 04（broken-3 是獨立的 OIDC 權限題，需要 Azure secrets 才能實跑；
-  OIDC 在本課對應的是 workflow 07 的 App Service 部署路徑。若你的環境還沒設定好，可以只讀 log 訊息並推理）
+- 已完成 Lab 01 ~ Lab 04（broken-3 是獨立的 OIDC 權限題，**不需要任何 secret、也不需要真的登入
+  Azure**：它用「全為零的佔位 UUID」當 client/tenant/subscription，只為了走到 OIDC 索取 token 的
+  步驟。OIDC 在本課對應的是 workflow 07 的 App Service 部署路徑）
 - 建議在 repo 開一個新分支做這個 lab，避免污染 `main`
 
 ## 步驟
@@ -107,6 +108,25 @@ OIDC 的流程是「workflow 先向 GitHub 索取一個 id token，再拿去換 
 **另一個陷阱：** job 層級的 `permissions:` 會**整組覆蓋** workflow 層級的設定。只寫 `id-token: write` 的話，`contents: read` 就沒了。需要的權限要一次列齊。
 
 **任務：** 補上正確的 `permissions:`。
+
+> 🔑 **關於這題用的身分（重要，且刻意不用 secret）：** 這題的 `azure/login` 三個輸入
+> （`client-id` / `tenant-id` / `subscription-id`）一律填「**全為零的佔位 UUID**」
+> `00000000-0000-0000-0000-000000000000`——它們**不是** secret，也**不是**任何真實 Azure
+> 身分，純粹用來讓 `azure/login` 走到「向 GitHub 索取 OIDC id token」那一步。
+>
+> **這題有兩個階段，請分清楚：**
+>
+> 1. **壞掉版（broken-3，缺 `id-token: write`）** — runner 拿不到
+>    `ACTIONS_ID_TOKEN_REQUEST_URL` / `_TOKEN`，所以 `azure/login` 會**在真正連到 Azure 之前**
+>    就失敗。這一步失敗**與佔位值無關**，純粹是權限問題——這正是本題要你診斷的根因。
+> 2. **修好版（fixed-3，補上 `contents: read` + `id-token: write`）** — 第一階段（索取 id token）
+>    成功，`azure/login` 於是**往前推進到 Azure 認證階段**；但因為身分是全零佔位 UUID、不對應
+>    任何真實應用程式，會在**Azure 認證階段**失敗。**這是修好後正確、預期的結果**：它證明權限
+>    問題已解決，瓶頸已從「拿不到 id token」前移到「佔位身分無法登入 Azure」。**你不需要、也
+>    不會**在這題真的登入成功。
+>
+> 真正能成功登入 Azure 的示範，只在講師的 **workflow 07（App Service + OIDC，使用講師設定好的
+> 真實 federated identity）** 進行；學員這題完全不碰真實 Azure 身分。
 
 ---
 
@@ -201,9 +221,12 @@ rerun:
 - [ ] Case 1 修好後，Actions 頁面**出現**這個 workflow 的執行紀錄且為綠色
 - [ ] Case 2 修好後，`Build` step 成功並出現 `BUILD SUCCESS`
 - [ ] Case 3：你能指出根因是**缺少 `id-token: write`**（沒有它，runner 拿不到索取 OIDC
-      token 所需的環境變數，`azure/login` 第一步就失敗），且修正後的 YAML 只加上**最小必要**的
-      `permissions: { contents: read, id-token: write }`。**不需要**在未配置的學員 fork 上真的
-      登入成功——實際的 Azure 登入由講師用已設定好的 workflow 07（App Service + OIDC）示範
+      token 所需的環境變數，`azure/login` 會**在連到 Azure 之前**就失敗），且修正後的 YAML 只加上
+      **最小必要**的 `permissions: { contents: read, id-token: write }`。三個 `azure/login` 輸入
+      一律是**全為零的佔位 UUID**（`00000000-0000-0000-0000-000000000000`，非 secret、非真實身分）；
+      **修正後預期仍會失敗，但失敗點會前移到「Azure 認證階段」**（佔位身分無法登入真實 Azure），
+      這是正確、預期的兩階段結果——**你不需要**在學員這題真的登入成功。實際的 Azure 登入由講師用
+      已設定好的 workflow 07（App Service + OIDC）示範
 - [ ] Case 4 修好後，`package` job 成功下載到 `downloaded/simpleweb.jar`
 - [ ] 你已建立 `ACTIONS_STEP_DEBUG`，並能指出 log 中至少一則 `##[debug]` 訊息
 - [ ] 你至少使用過一次 **re-run failed jobs**
