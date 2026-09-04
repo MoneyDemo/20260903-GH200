@@ -12,7 +12,8 @@
 #   Repository variables : VM_PUBLIC_IP / VM_SSH_USER / VM_SSH_HOST_KEY
 #   Environment secret   : VM_SSH_PRIVATE_KEY（設在 test 與 production 兩個 Environment，
 #                          不是 repository secret）
-#   GitHub Environment   : production（必須自己在設定頁加上 required reviewer）
+#   GitHub Environment   : production（實際 approval gate 由講師在 class repo 示範；學員這份
+#                          YAML 只做設計／review，不在自己的 fork 加 reviewer）
 #
 # 目標環境契約（不可改）：
 #   prod → simpleweb-prod，8081，/opt/simpleweb/prod/simpleweb.jar
@@ -53,7 +54,7 @@ jobs:
     # TODO 4: permissions: actions: read
     #   這是這個 job 唯一需要的權限——只用來讀 run 清單、下載 artifact。
     # TODO 5: environment: name production + url http://${{ vars.VM_PUBLIC_IP }}:8081/
-    #   保護規則（required reviewer）設在 environment 上，不是寫在 YAML 裡。
+    #   實際 approval gate 由 class repo 的 environment 管控；這份 YAML 只表達 production。
     steps:
       # TODO 6: 用 gh run list --repo <owner/repo> --workflow lab04-deploy-test.yml
       #         --commit "$BUILD_SHA" --status success --json databaseId,headSha,conclusion

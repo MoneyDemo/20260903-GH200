@@ -3,11 +3,10 @@
 #
 # 目的地：.github/workflows/lab04-deploy-test.yml
 #
-# 事前準備（講師會在課堂上給你實際值）：
-#   Repository variables : VM_PUBLIC_IP / VM_SSH_USER / VM_SSH_HOST_KEY
-#   Environment secret   : VM_SSH_PRIVATE_KEY（部署用的長期私鑰；分別設在 test 與
-#                          production 兩個 Environment，不要放成 repository secret，
-#                          這樣任意分支的 job 讀不到這把可 sudo 的長期私鑰）
+# 事前準備（trainer-only 設計佔位；學員不會取得任何共用課程 VM 憑證）：
+#   Repository variables : VM_PUBLIC_IP / VM_SSH_USER / VM_SSH_HOST_KEY（僅作設計佔位）
+#   Environment secret   : VM_SSH_PRIVATE_KEY（部署用的長期私鑰；只在 class repo 端配置，
+#                          學員 fork 不會收到）
 #   GitHub Environment   : test
 #
 # 目標環境契約（不可改）：

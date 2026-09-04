@@ -83,7 +83,8 @@ job 之間傳遞，**不需要把 repo 設成 public，也不需要在 VM 上開
 > 並在 `if: always()` 的步驟中清除。
 
 因此 Lab 04／05 是**設計 + 觀察**：學員撰寫並 review 部署 YAML，實際的 SSH 部署由講師在 class
-repo 示範（VM 的 SSH 連線設定只在 class repo 端配置，學員不會拿到）。repo 可以維持 private。
+repo 示範（VM 的 SSH 連線設定只在 class repo 端配置，學員不會拿到）。這份 fork 只供 CI/YAML
+練習，不會取得課程 VM/Azure credentials。
 Lab 03 教的 workflow artifact 在這裡正是 job 之間交接 jar 的通道。
 
 ### 🔴 關於 VM 的 IP
@@ -108,7 +109,8 @@ Lab 03 教的 workflow artifact 在這裡正是 job 之間交接 jar 的通道�
 - [ ] 瀏覽器可以連到 GitHub
 - [ ] 你自己帳號底下有一份課程 repo（fork 或 clone），且 **Actions 已啟用**
 - [ ] repo 中已建立 environment：`test` 與 `production`（供 Lab 04/05 的 YAML 對照用）
-- [ ] repo 可維持 **private**（CI/YAML 練習不需要 public repo）
+- [ ] 這份 fork 只供 CI/YAML 練習，不會取得課程 VM/Azure credentials；若要做 isolated runner
+      demo，請另外使用獨立實驗 repo
 - [ ] **你不需要**任何課程 VM 的 SSH 私鑰、host key、public IP 或 SSH 使用者，也不需要任何
       Azure 身分——Lab 04／05 的實際部署由講師在 class repo 實跑、學員觀察
 
@@ -130,8 +132,9 @@ chmod +x setup-student-repo.sh
 ```
 
 腳本會檢查工具、fork + clone repo、啟用 Actions、建立兩個 environment（供 Lab 04/05 的 YAML
-對照用），並印出下一步。**腳本不接收、也不散布任何部署憑證**：它不會設定 VM 的 SSH 私鑰、
-host key、public IP、SSH 使用者，也不會設定任何 Azure 身分。
+對照用），並印出下一步。**腳本只處理 CI/YAML 練習的 fork 邊界，不接收、也不散布任何部署
+憑證**：它不會設定 VM 的 SSH 私鑰、host key、public IP、SSH 使用者，也不會設定任何 Azure
+身分；任何 isolated runner experiment 都在這份腳本之外。
 
 > 🔒 **學員不會拿到課程 VM 的憑證。** Lab 04／05 的實際 SSH 部署與 production 核准只由講師在
 > class repo（`MoneyDemo/20260903-GH200`）示範；VM 的 SSH 私鑰（可 sudo 的長期憑證）、host key、
@@ -310,5 +313,5 @@ tag 方便閱讀。**不要**把可變 tag（`@v5` 這種）複製進這些特�
   Environment 各一份的 Environment secret。
 - **課堂 `08` 是唯讀參考範本，學員不在任何 repo 實跑 self-hosted runner。** 課堂唯一的 live
   same-VM runner demo 由講師在私有的 `MoneyYu/GH-200` 上以其常駐 runner 示範。若有學員想在
-  **課後**親手體驗，只能在**經講師同意的另一台隔離機器 + 另一個獨立 private repository**上進行，
+  **課後**親手體驗，只能在**經講師同意的另一台隔離機器 + 另一個獨立實驗 repository**上進行，
   **絕不**使用課程 VM、課程 repo 或其 fork（見 [`lab07-selfhosted-runner.md`](lab07-selfhosted-runner.md) 的 F 段）

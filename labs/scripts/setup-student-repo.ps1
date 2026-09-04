@@ -12,12 +12,14 @@
       6. 印出下一步
 
     範圍與邊界（重要）：
-      - 你的 fork 用於 Lab 01–03 與 Lab 06 的 CI / YAML 練習，可維持 private。
+      - 你的 fork 只用於 Lab 01–03 與 Lab 06 的 CI / YAML 練習；這份 setup script 只處理
+        public fork 的 CI/YAML 邊界，不會發放課程 VM/Azure credentials。
       - **本腳本不會、也不應該發放任何部署憑證或雲端身分**：不設定 VM 的 SSH 私鑰、
         host key、public IP、SSH 使用者，也不設定任何 Azure client/tenant/subscription 身分。
       - Lab 04／05 的實際部署（SSH 到課程 VM）與 production 核准關卡，都是**講師在 class repo
         實跑、學員觀察**的示範；學員在自己的 fork 只做 YAML 撰寫與 review，不會拿到課程 VM 金鑰。
-      - Lab 07（self-hosted runner）是觀察／設計練習，學員不註冊 runner、不連課程 VM。
+      - Lab 07（self-hosted runner）是觀察／設計練習，學員不註冊 runner、不連課程 VM；
+        任何 isolated runner experiment 都在這份 setup script 之外。
 
     安全性：
       - 不刪除任何檔案、不使用萬用字元
@@ -150,7 +152,7 @@ Write-Step '啟用 GitHub Actions'
     -F enabled=true | Out-Null
 if ($LASTEXITCODE -ne 0) { throw 'Actions 啟用失敗，請確認你對該 repo 有 admin 權限。' }
 Write-Ok 'Actions 已啟用（保留既有 allowed-actions policy）'
-Write-Host "    註：你的 fork 用於 Lab 01–03／06 的 CI/YAML 練習，可維持 private。" -ForegroundColor DarkGray
+Write-Host "    註：你的 fork 只用於 Lab 01–03／06 的 CI/YAML 練習；setup script 不會發放課程 VM/Azure credentials。" -ForegroundColor DarkGray
 
 # ---------------------------------------------------------------------------
 # 6. 建立 environments（供 Lab 04/05 的 YAML 對照；實際部署由講師示範）
@@ -183,6 +185,7 @@ Write-Host @"
   5. Lab 04／05 是「設計 + 觀察」：你在 fork 撰寫並 review 部署 YAML，
      實際的 test/prod 部署與 production 核准由講師在 class repo 示範。
      你不會、也不需要拿到課程 VM 的 SSH 私鑰、host key、IP 或任何 Azure 身分。
-  6. Lab 07（self-hosted runner）是觀察／設計練習：觀察講師在私有 MoneyYu/GH-200 的
-     08 執行，學員不註冊 runner、不連課程 VM。
+  6. Lab 07（self-hosted runner）是觀察／設計練習：觀察講師在 MoneyYu/GH-200 的
+     08 執行，學員不註冊 runner、不連課程 VM；任何 isolated runner experiment 都在這份
+     setup script 之外。
 "@ -ForegroundColor White
