@@ -295,8 +295,14 @@ tag 方便閱讀。**不要**把可變 tag（`@v5` 這種）複製進這些特�
   troubleshooting 練習使用，不再對應任何 VM／Blob 部署身分
 - **⚠️ 本 repo（`MoneyDemo/20260903-GH200`）與 `MoneyYu/GH-200` 目前共用同一個 Linux Web
   App，兩邊的 workflow 07 不可同時 dispatch**——曾實測同時觸發時兩邊的 OneDeploy 都因
-  App Service 啟動逾時失敗，需序列化（一次只跑一邊）才能成功；這是操作排程限制，不是
-  GitHub 的跨 repo concurrency lock，安排班級與另一 repo 的示範時程時要避開重疊
+  App Service 啟動逾時失敗。**規則：在另一個 repo 的 `07` run 顯示成功、且該 Web App
+  的 `/api/info` 回應已核對等於該次 commit 的 `buildSha` 之前，不得啟動本 repo 的
+  `07`**；反之亦然。誰的 `07` 最後成功部署，App Service 上的版本就會被覆蓋為誰的
+  （last successful deployment wins，沒有版本回滾）。若仍發生碰撞或其中一邊逾時失敗，
+  等兩邊的 run 都跑完（不論成功或失敗）後，只重新 dispatch 真正想要上線的那個 repo 的
+  `07`，並重新以 `/api/info` 核對 `buildSha` 相符才視為完成。這是講師／agent 需人工遵守
+  的操作排程規則，**不是**、也不要用 `concurrency:` group 實作 GitHub 跨 repo 的假鎖
+  （fake cross-repo lock）；安排班級與另一 repo 的示範時程時要避開重疊
 - **本 repo 主 default branch 的現行主線已 live dispatch 成功一次**（`demo-java-04` run
   [33818661549](https://github.com/MoneyDemo/20260903-GH200/actions/runs/33818661549)、
   `demo-java-05` reviewer-approved run
