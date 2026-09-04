@@ -289,6 +289,29 @@ tag 方便閱讀。**不要**把可變 tag（`@v5` 這種）複製進這些特�
 - 示範 workflow 07（App Service + OIDC）另需 Azure 端的 federated credential 與
   `AZURE_WEB_APP_NAME` / `AZURE_WEB_APP_HOSTNAME` / `AZURE_RESOURCE_GROUP` 變數，以及
   GitHub secret `AZURE_WEBAPP_CLIENT_ID`（這個 Web App 專屬 identity 的 client ID，
-  不是 Lab 06 broken-3 用的舊 `AZURE_CLIENT_ID`；舊 secret 維持不動，等其他 VM／Blob
-  相關使用者全部除役後才處理）
+  不是 Lab 06 broken-3 用的舊 `AZURE_CLIENT_ID`）。舊共用 identity 的 VM／Blob 部署角色
+  （四個 federated credential、VM Contributor、Blob Contributor、Blob Reader）已完成
+  除役移除；`AZURE_CLIENT_ID` secret 名稱現在只保留給 Lab 06 broken-3／fixed-3 的 M2 OIDC
+  troubleshooting 練習使用，不再對應任何 VM／Blob 部署身分
+- **⚠️ 本 repo（`MoneyDemo/20260903-GH200`）與 `MoneyYu/GH-200` 目前共用同一個 Linux Web
+  App，兩邊的 workflow 07 不可同時 dispatch**——曾實測同時觸發時兩邊的 OneDeploy 都因
+  App Service 啟動逾時失敗，需序列化（一次只跑一邊）才能成功；這是操作排程限制，不是
+  GitHub 的跨 repo concurrency lock，安排班級與另一 repo 的示範時程時要避開重疊
+- **本 repo 主 default branch 的現行主線已 live dispatch 成功一次**（`demo-java-04` run
+  [33818661549](https://github.com/MoneyDemo/20260903-GH200/actions/runs/33818661549)、
+  `demo-java-05` reviewer-approved run
+  [33818771304](https://github.com/MoneyDemo/20260903-GH200/actions/runs/33818771304)、
+  `demo-java-06`（於上方 Azure identity 除役**之後**再次 dispatch）run
+  [33820467021](https://github.com/MoneyDemo/20260903-GH200/actions/runs/33820467021)、
+  `demo-java-07-deploy-webapp`（Azure CLI JAR deploy，同樣在除役之後）run
+  [33820921333](https://github.com/MoneyDemo/20260903-GH200/actions/runs/33820921333)、
+  `demo-java-08-selfhosted-runner` run
+  [33819196217](https://github.com/MoneyDemo/20260903-GH200/actions/runs/33819196217)；
+  `07` 的 `/api/info` build SHA 與該次 default-branch run SHA 完全相符。
+  `demo-java-09-troubleshooting` 維持預期失敗（教學用途，不要修成會成功）：run
+  [33819300197](https://github.com/MoneyDemo/20260903-GH200/actions/runs/33819300197)。
+  本 repo 的 `test`／`production` Environments 現在都只允許 default branch 部署，
+  `production` 的 required-reviewer approval gate 維持不變。舊的 repository 層級
+  `VM_SSH_PRIVATE_KEY` 副本已刪除，本 repo 現在只剩 `test`／`production` 兩個
+  Environment 各一份的 Environment secret。
 - Lab 07 若要實作，需提供 VM 的 SSH 連線方式
